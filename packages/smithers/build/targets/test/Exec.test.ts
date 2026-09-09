@@ -10,14 +10,18 @@
 import { Flow, FlowRuntime } from "@smthrs/flow"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
 import * as Layer from "effect/Layer"
+import * as TestClock from "effect/testing/TestClock"
+import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as Changesets from "../src/Changesets.ts"
 import * as Exec from "../src/Exec.ts"
+import * as ExecSandbox from "../src/ExecSandbox.ts"
 import * as Secret from "../src/Secret.ts"
 import * as Target from "../src/Target.ts"
 
@@ -54,11 +58,97 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Fs.rm(root, { recursive: true, force: true })
   await Fs.rm(outside, { recursive: true, force: true })
 })
 
 describe("run", () => {
+  it("removes scratch directories when preparing a write directory fails", async () => {
+    const host = ExecSandbox.host()
+    vi.spyOn(ExecSandbox, "host").mockReturnValue({
+      ...host,
+      platform: "linux",
+      executable: (name) => `/usr/bin/${name}`
+    })
+    const plan = ExecSandbox.plan
+    let scratch: string | undefined
+    vi.spyOn(ExecSandbox, "plan").mockImplementationOnce((...args) => {
+      const confinement = plan(...args)
+      if (confinement === undefined || ExecSandbox.isUnenforceable(confinement)) {
+        throw new Error("expected an enforceable plan")
+      }
+      scratch = confinement.tmp
+      // A declared directory becomes a file between planning and preparation.
+      NodeFs.writeFileSync(NodePath.join(root, "blocked"), "occupied")
+      return confinement
+    })
+    const error = await failed(payload([process.execPath, "-e", "0"]), {
+      workspaceRoot: root,
+      sandbox: { policy: {}, reads: [], writes: ["blocked"] }
+    })
+    expect(error.code).toBe("spawn_failed")
+    expect(error.stderr).toContain("could not prepare the confinement")
+    expect(error.stderr).toContain("EEXIST")
+    expect(scratch).toBeDefined()
+    expect(NodeFs.existsSync(scratch!)).toBe(false)
+    expect(await Fs.readFile(NodePath.join(root, "blocked"), "utf8")).toBe("occupied")
+  })
+
+  it("retains the bounded stderr tail and explanation when a tool times out", async () => {
+    const error = await failed({
+      ...payload([
+        process.execPath,
+        "-e",
+        `process.stderr.write('x'.repeat(${
+          Exec.stderrTailLimit * 2
+        }) + '\\nwaiting for dependency lock\\n');setInterval(()=>{},1000)`
+      ]),
+      timeoutMs: 2000
+    })
+    expect(error.code).toBe("timed_out")
+    expect(error.stderr).toContain("waiting for dependency lock")
+    expect(error.stderr).toContain("the tool timed out after 2000ms")
+    expect(error.stderr.length).toBeLessThanOrEqual(Exec.stderrTailLimit)
+  })
+
+  it("runs an unbounded tool until interruption and reaps its process", async () => {
+    let resolveStarted!: (pid: number) => void
+    const started = new Promise<number>((resolve) => {
+      resolveStarted = resolve
+    })
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const fiber = yield* Exec.run({
+          workspaceRoot: root,
+          onStdout: (chunk) => resolveStarted(Number(Buffer.from(chunk).toString("utf8")))
+        }, {
+          ...payload([process.execPath, "-e", "process.stdout.write(String(process.pid));setInterval(()=>{},1000)"]),
+          timeoutMs: "unbounded"
+        }).pipe(Effect.forkChild)
+        try {
+          const outcome = yield* Effect.promise(() =>
+            Promise.race([
+              started.then((pid) => ({ pid })),
+              Effect.runPromise(Fiber.await(fiber)).then((exit) => ({ exit }))
+            ])
+          )
+          if (!("pid" in outcome)) {
+            throw new Error(`service exited before interruption: ${JSON.stringify(outcome.exit)}`)
+          }
+          yield* TestClock.adjust(Exec.defaultTimeoutMs * 2)
+          expect(fiber.pollUnsafe()).toBeUndefined()
+          expect(() => process.kill(outcome.pid, 0)).not.toThrow()
+          yield* Fiber.interrupt(fiber)
+          expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true)
+          expect(() => process.kill(outcome.pid, 0)).toThrow()
+        } finally {
+          yield* Fiber.interrupt(fiber)
+        }
+      }).pipe(Effect.provide(TestClock.layer()))
+    )
+  })
+
   it("executes the catalog refusal through its live layer", async () => {
     type Registered = (
       input: { readonly target: string },

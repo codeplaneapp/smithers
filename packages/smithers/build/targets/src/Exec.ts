@@ -106,7 +106,7 @@ export const stderrTailLimit = 64 * 1024
  */
 export const defaultTimeoutMs = 10 * 60 * 1000
 /**
- * Maximum wall-clock duration accepted for one external tool process.
+ * Maximum bounded wall-clock duration accepted for one external tool process.
  *
  * @category constants
  * @since 0.1.0
@@ -129,8 +129,10 @@ const maximumSecrets = 64
  * environment rather than the complete `process.env`.
  * `expectedExitCodes` lists the exit codes treated as success and defaults
  * to `[0]`. `timeoutMs` bounds the process lifetime and defaults to ten
- * minutes. `after` carries the planned result of an upstream step this run
- * must wait for: a planned reference here is a material dependency, so the
+ * minutes. Set `timeoutMs` to `"unbounded"` for a service governed by
+ * interruption instead of a deadline. `after` carries the planned result of
+ * an upstream step this run must wait for: a planned reference here is a
+ * material dependency, so the
  * engine settles the upstream step before it dispatches this one. The spawn
  * never reads it.
  *
@@ -153,10 +155,13 @@ export const Payload = Schema.Struct({
   ).check(Schema.isMaxLength(maximumExpectedExitCodes)).pipe(
     Schema.withConstructorDefault(Effect.succeed([0]))
   ),
-  timeoutMs: Schema.Int.check(
-    Schema.isGreaterThanOrEqualTo(1),
-    Schema.isLessThanOrEqualTo(maximumTimeoutMs)
-  ).pipe(Schema.withConstructorDefault(Effect.succeed(defaultTimeoutMs))),
+  timeoutMs: Schema.Union([
+    Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(maximumTimeoutMs)
+    ),
+    Schema.Literal("unbounded")
+  ]).pipe(Schema.withConstructorDefault(Effect.succeed(defaultTimeoutMs))),
   after: Schema.optional(Schema.Unknown)
 })
 
@@ -1088,12 +1093,19 @@ const spawnTool = (
         stderrTail: stderr.tail
       }
     })
-    return program.pipe(
-      Effect.timeoutOrElse({
-        duration: payload.timeoutMs,
-        orElse: () => Effect.fail(failure(`the tool timed out after ${payload.timeoutMs}ms`, "timed_out"))
-      }),
-      Effect.scoped
+    return Effect.scoped(
+      payload.timeoutMs === "unbounded" ? program : program.pipe(
+        Effect.timeoutOrElse({
+          duration: payload.timeoutMs,
+          orElse: () => {
+            finish(stderr)
+            return Effect.fail(failure(
+              `${stderr.tail}\nthe tool timed out after ${payload.timeoutMs}ms`,
+              "timed_out"
+            ))
+          }
+        })
+      )
     )
   })
 
@@ -1310,6 +1322,15 @@ const confined = (
   if (confinement === undefined) {
     return spawnTool(cwd, resolved, sensitiveEnv, secretEnv, options.onStdout, options.onStderr, options.environment)
   }
+  const preparationError = (cause: unknown): ExecError =>
+    execError({
+      argv: resolved.argv,
+      cwd: resolved.cwd,
+      exitCode: -1,
+      code: "spawn_failed",
+      stdout: "",
+      stderr: tail(`sandbox: could not prepare the confinement: ${failureMessage(cause)}`)
+    })
   const prepare = Effect.try({
     try: () => {
       ExecSandbox.validateWrites(confinement)
@@ -1326,35 +1347,40 @@ const confined = (
         env: { ...resolved.env, ...wrapped.env }
       }
     },
-    catch: (cause) =>
-      execError({
+    catch: preparationError
+  })
+  return Effect.scoped(Effect.gen(function*() {
+    yield* Effect.acquireRelease(
+      Effect.try({
+        try: () => NodeFs.mkdirSync(confinement.tmp, { recursive: true }),
+        catch: preparationError
+      }),
+      () =>
+        Effect.sync(() => {
+          try {
+            NodeFs.rmSync(confinement.tmp, { recursive: true, force: true })
+          } catch {
+            // Cleanup is best-effort when the host refuses directory removal.
+          }
+        })
+    )
+    const payload = yield* prepare
+    return yield* spawnTool(
+      cwd,
+      payload,
+      sensitiveEnv,
+      secretEnv,
+      options.onStdout,
+      options.onStderr,
+      options.environment
+    ).pipe(
+      Effect.mapError((error) => ({
+        ...error,
         argv: resolved.argv,
-        cwd: resolved.cwd,
-        exitCode: -1,
-        code: "spawn_failed",
-        stdout: "",
-        stderr: tail(`sandbox: could not prepare the confinement: ${failureMessage(cause)}`)
-      })
-  })
-  const cleanup = Effect.sync(() => {
-    try {
-      NodeFs.rmSync(confinement.tmp, { recursive: true, force: true })
-    } catch {
-      // A scratch directory that resists removal is left for the next run's sweep.
-    }
-  })
-  return Effect.flatMap(
-    prepare,
-    (payload) =>
-      spawnTool(cwd, payload, sensitiveEnv, secretEnv, options.onStdout, options.onStderr, options.environment).pipe(
-        Effect.mapError((error) => ({
-          ...error,
-          argv: resolved.argv,
-          stderr: tail(annotate(confinement, error.stderr))
-        })),
-        Effect.ensuring(cleanup)
-      )
-  )
+        stderr: tail(annotate(confinement, error.stderr))
+      }))
+    )
+  }))
 }
 
 /**

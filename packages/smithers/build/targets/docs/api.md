@@ -64,7 +64,17 @@ producing a declared output fails the target.
 closed `code` (`invalid_payload`, `spawn_failed`, `timed_out`, `signaled`,
 `stream_failed`, `secret_proxy_failed`, `exit_status`) and, for a signalled
 child, the `signal` itself, so a caller decides what to do without parsing
-stderr.
+stderr. Timeout errors retain the bounded stderr tail followed by the timeout
+explanation.
+
+`Exec.Payload.timeoutMs` defaults to 600,000 ms and accepts integer deadlines
+from 1 through 86,400,000 ms. Set it to `"unbounded"` for a process whose lifetime
+is governed by interruption. `Dev` plans this unbounded policy; ordinary exec
+calls retain the bounded default. Both policies kill the process group on
+interruption. A clean process exit completes the action.
+
+Sandbox scratch cleanup covers preparation, execution, and interruption,
+including failures while creating declared write directories or wrapping argv.
 
 `Exec.cacheDirectoryToken` in argv resolves to the absolute host cache directory
 immediately before spawn, after workspace confinement checks. Its path is
