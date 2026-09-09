@@ -60,8 +60,9 @@ import { Core, GitHub } from "@smthrs/integrations"
 const secret = "shared-secret"
 const text = JSON.stringify({
   action: "opened",
-  pull_request: { number: 12 },
-  repository: { full_name: "acme/api" }
+  pull_request: { number: 12, author_association: "MEMBER" },
+  repository: { full_name: "acme/api" },
+  sender: { login: "ana", type: "User" }
 })
 
 const delivery = {
@@ -76,6 +77,38 @@ const delivery = {
 
 GitHub.Webhook.verify(delivery, secret) // true
 const event = GitHub.Webhook.decode(delivery, JSON.parse(text))
+```
+
+Give any fixture you expect to be accepted an `author_association`, and a
+`sender` that is not a bot. `decode` gates the sender after the signature
+check, so a valid signature is not enough: the defaults admit `OWNER`,
+`MEMBER`, and `COLLABORATOR`, and `allowedAssociations` on the channel widens
+them. The same delivery without an association verifies and is then refused:
+
+```ts
+import { Core, GitHub } from "@smthrs/integrations"
+
+const secret = "shared-secret"
+const anonymous = JSON.stringify({
+  action: "opened",
+  pull_request: { number: 12 },
+  repository: { full_name: "acme/api" }
+})
+
+const refused = {
+  body: new TextEncoder().encode(anonymous),
+  headers: {
+    "x-github-event": "pull_request",
+    "x-github-delivery": "delivery-2",
+    "x-hub-signature-256": `sha256=${Core.Signature.computeHmacSha256Hex(anonymous, secret)}`
+  },
+  idempotencyKey: "github:delivery-2"
+}
+
+GitHub.Webhook.verify(refused, secret) // true
+// Throws GitHub.Webhook.SenderRefused, reason permission-denied,
+// skipReason "missing-association".
+GitHub.Webhook.decode(refused, JSON.parse(anonymous))
 ```
 
 In an ingress the key comes from `GitHub.Webhook.idempotencyKey(raw)`, which

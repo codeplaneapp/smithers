@@ -166,10 +166,12 @@ Telegram's whole retained backlog. Inspect the
 
 ### The source receives nothing, or receives other chats
 
-With `allowedChatIds` set, updates from other chats are dropped, and so is an
-update whose chat the source cannot determine, such as a button press on an
-inaccessible message. That is the allowlist failing closed. Without the
-option, check `allowedUpdates`: the default set is `message`,
+`allowedChatIds` is required: `Source.make` throws `invalid-config` when it is
+missing or empty, so a source that polls at all has an allowlist. Updates from
+chats outside it are dropped, and so is an update whose chat the source cannot
+determine, such as a button press on an inaccessible message. That is the
+allowlist failing closed. A silent source means the chat id is not in the list,
+or the update kind is not in `allowedUpdates`: the default set is `message`,
 `edited_message`, and `callback_query`.
 
 ### An approval prompt never resolves

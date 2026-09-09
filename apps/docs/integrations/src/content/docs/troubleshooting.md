@@ -88,10 +88,13 @@ is the safety property working, not a bug.
 
 ### `listener-conflict`: the workspace lock is held
 
-Another process is applying against the same workspace, and its lock record
-is fresh. Wait for it to finish. A lock whose holder record is older than a
-day is reclaimed automatically, so a crashed process cannot wedge the
-workspace.
+Another process is applying against the same workspace. Wait for it to
+finish. A lock is reclaimed immediately when a PID liveness check reports
+`ESRCH` (the holder no longer exists). Permission errors do not prove the
+holder is dead. Records older than a day remain reclaimable as a fallback.
+An empty or malformed record is held for a five-second initialization grace
+period before it can be reclaimed. Replacement records are checked before
+removal.
 
 ### `delivery-failed`: more webhooks than one reconciliation can read
 
@@ -164,10 +167,12 @@ Telegram's whole retained backlog. Inspect the
 
 ### The source receives nothing, or receives other chats
 
-With `allowedChatIds` set, updates from other chats are dropped, and so is an
-update whose chat the source cannot determine, such as a button press on an
-inaccessible message. That is the allowlist failing closed. Without the
-option, check `allowedUpdates`: the default set is `message`,
+`allowedChatIds` is required: `Source.make` throws `invalid-config` when it is
+missing or empty, so a source that polls at all has an allowlist. Updates from
+chats outside it are dropped, and so is an update whose chat the source cannot
+determine, such as a button press on an inaccessible message. That is the
+allowlist failing closed. A silent source means the chat id is not in the list,
+or the update kind is not in `allowedUpdates`: the default set is `message`,
 `edited_message`, and `callback_query`.
 
 ### An approval prompt never resolves
