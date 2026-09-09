@@ -140,7 +140,10 @@ pnpm exec smithers-build ci '//packages/smithers/build/infra/...'
 ```
 
 That plans the typecheck (`:check`), the suite (`:suite`), ESLint (`:lint`),
-and the README parity check (`:docs`). The fast local loop is
+dprint (`:fmt`), and the README parity check (`:docs`). ESLint and dprint use
+the infra-local configurations, matching `pnpm run lint`. Worker and script
+source globs include new modules automatically; worker tests use their own
+TypeScript configuration. The fast local loop is
 `pnpm exec vitest run` from `packages/smithers/build/infra`.
 
 The suite computes coverage and fails below 100% on branches, functions,

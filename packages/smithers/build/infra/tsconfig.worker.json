@@ -6,7 +6,9 @@
     ]
   },
   "include": [
-    "worker/index.ts",
-    "worker/protocol.ts"
+    "worker/**/*.ts"
+  ],
+  "exclude": [
+    "worker/test/**"
   ]
 }

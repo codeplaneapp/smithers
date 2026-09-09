@@ -2,8 +2,10 @@
   "$schema": "https://dprint.dev/schemas/v0.json",
   "incremental": false,
   "includes": [
-    "worker/protocol.ts",
-    "scripts/redact-state.ts",
+    "worker/**/*.ts",
+    "scripts/**/*.ts",
+    "deployment.ts",
+    "alchemy.run.ts",
     "package.json",
     "eslint.config.js",
     "dprint.json"
@@ -19,6 +21,8 @@
     "arrowFunction.useParentheses": "force"
   },
   "excludes": [
+    "worker/test/**",
+    "**/*.test.ts",
     "**/dist",
     "**/build",
     "**/coverage",

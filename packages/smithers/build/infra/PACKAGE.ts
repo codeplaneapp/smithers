@@ -70,26 +70,49 @@ const suite = Smithers.Vitest({
 /**
  * Lints the worker and the operator scripts.
  *
- * `packages/smithers/build/eslint.config.js` has configured `infra/**` since this
- * directory was imported, but nothing ran it: the parent package's `lint`
- * target takes the standard `src/**` glob, so these files reached ESLint
- * only by hand. The target runs from `packages/smithers/build` so the flat config's
- * relative `files` patterns and `tsconfigRootDir` resolve.
+ * Shares the infra-local JSDoc policy and file scope with `pnpm run lint`.
+ * Workspace-rooted declarations resolve identically for planning and ESLint.
  *
  * @since 0.1.0
  * @category lint
  */
 const lint = Smithers.EsLint({
-  sources: [Smithers.glob("infra/**/*.ts")],
+  sources: [
+    Smithers.glob("//packages/smithers/build/infra/worker/**/*.ts"),
+    Smithers.glob("//packages/smithers/build/infra/scripts/**/*.ts"),
+    Smithers.file("//packages/smithers/build/infra/deployment.ts"),
+    Smithers.file("//packages/smithers/build/infra/alchemy.run.ts")
+  ],
   deps: [],
   configs: [
-    Smithers.file("eslint.config.js"),
-    Smithers.file("//eslint.jsdoc.js"),
-    Smithers.file("//eslint.invariants.js")
+    Smithers.file("//packages/smithers/build/infra/eslint.config.js"),
+    Smithers.file("//eslint.jsdoc.js")
   ],
   maxWarnings: 0,
   fix: false,
-  cwd: "packages/smithers/build"
+  cwd
+})
+
+/**
+ * Checks the same formatting policy as `pnpm run lint`.
+ *
+ * @since 0.1.0
+ * @category lint
+ */
+const fmt = Smithers.Dprint({
+  sources: [
+    Smithers.glob("//packages/smithers/build/infra/worker/**/*.ts"),
+    Smithers.glob("//packages/smithers/build/infra/scripts/**/*.ts"),
+    Smithers.file("deployment.ts"),
+    Smithers.file("alchemy.run.ts"),
+    Smithers.file("package.json"),
+    Smithers.file("eslint.config.js"),
+    Smithers.file("dprint.json")
+  ],
+  deps: [],
+  config: Smithers.file("dprint.json"),
+  fix: false,
+  cwd
 })
 
 /**
@@ -105,5 +128,5 @@ const docs = Smithers.DocsParity({
 })
 
 export const Package = Smithers.Package({
-  targets: { check, docs, lint, suite }
+  targets: { check, docs, fmt, lint, suite }
 })
