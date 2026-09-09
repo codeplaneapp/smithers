@@ -169,6 +169,32 @@ describe("repositories seam", () => {
     expect(requests.filter((request) => request.includes("/bookmarks"))).toEqual([])
   })
 
+  test("the bookmarks list reads plue's cursor envelope, not only a bare array", async () => {
+    // plue answers `{ items, next_cursor }` here (routes/jj_vcs.go ListBookmarks
+    // through routes/pagination.go cursorResponse), so a head read out of the
+    // envelope is the deployed protocol, not a variant.
+    const enveloped = (path: string): Response =>
+      path === "api/user/repos"
+        ? json(200, [{ owner: "will", name: "smithers", full_name: "will/smithers", default_bookmark: "main" }])
+        : path === "api/user/orgs"
+        ? json(200, [])
+        : path === "api/repos/will/smithers/bookmarks"
+        ? json(200, {
+          items: [{ name: "main", target_change_id: "qupxosqw", target_commit_id: "c0ffee1", is_tracking_remote: false }],
+          next_cursor: ""
+        })
+        : json(404, {})
+    const { store, seam } = await harness(enveloped, { workspaces: json(403, {}) })
+    const refusal = await seam.loadRepositories()
+    expect(refusal).toBeUndefined()
+    expect(repos(store)).toEqual([
+      expect.objectContaining({
+        id: "will/smithers",
+        head: { bookmark: "main", changeId: "qupxosqw", commitId: "c0ffee1" }
+      })
+    ])
+  })
+
   test("a failed repos read is an honest error and dispatches nothing", async () => {
     const { store, seam } = await harness(() => json(401, { message: "bad credentials" }))
     const refusal = await seam.loadRepositories()

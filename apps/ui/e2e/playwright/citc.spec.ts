@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test"
-import type { Page } from "@playwright/test"
-import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
+import { installCloudFixture } from "./cloudFixture.ts"
 
 /*
  * Lane citc T1 (docs/workbench-lanes/citc.md "Exit", ADR 0002): against a
@@ -9,9 +8,9 @@ import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
  * the upstream answered, and a degraded sign-in refuses a workspace act with
  * the exact "sign in again to enable" wording.
  *
- * The server is a double (piper.spec.ts's pattern): every seam answers
- * through page.route — the bootstrap, the cloud session, the Smithers Cloud
- * inventory, and the workspace routes behind /api/cloud/*.
+ * The server is a double: the shared cloud fixture (cloudFixture.ts) answers
+ * the bootstrap, the cloud session and the Smithers Cloud inventory; this
+ * spec adds the workspace routes behind /api/cloud/*.
  */
 
 const REPO = "smithersai/smithers"
@@ -33,41 +32,6 @@ const json = (body: unknown, status = 200) => ({
   body: JSON.stringify(body)
 })
 
-/** Install the server double: signed in to a cloud that inventories smithersai/smithers. */
-const serve = async (
-  page: Page,
-  options: { readonly degraded?: boolean } = {}
-): Promise<void> => {
-  // The last route registered wins, so the catch-all goes first.
-  await page.route("**/api/**", (route) => route.fulfill(json({ error: { code: "absent", message: "no seam" } }, 404)))
-  await page.route("**/api/bootstrap", (route) => route.fulfill(json({
-    apiVersion: 1,
-    host: "local",
-    version: "test",
-    buildSha: "test",
-    capabilities: ["agent", "identity", "cloud", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
-    authFlow: "none",
-    sandbox: { platform: "darwin", mode: "trusted-only" }
-  })))
-  await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [] })))
-  await page.route("**/api/cloud-auth/session", (route) =>
-    route.fulfill(json({
-      ...SCOPED_TEST_USER_CLOUD_SESSION,
-      ...(options.degraded === true ? { scopes: "degraded" } : {})
-    })))
-  await page.route("**/api/cloud/api/user/repos", (route) =>
-    route.fulfill(json({ repos: [{ owner: "smithersai", name: "smithers", full_name: REPO, default_bookmark: "main" }] })))
-  await page.route("**/api/cloud/api/user/orgs", (route) => route.fulfill(json({ orgs: [{ login: "smithersai" }] })))
-  // plue's list routes answer a bare array (the per-user one in UserWorkspaceRow shape); the seam asks `?limit=100`.
-  await page.route(/\/api\/cloud\/api\/user\/workspaces(\?.*)?$/, (route) => route.fulfill(json([])))
-  // Bookmarks come in plue's cursor envelope (routes/pagination.go cursorResponse).
-  await page.route(`**/api/cloud/api/repos/${REPO}/bookmarks`, (route) =>
-    route.fulfill(json({
-      items: [{ name: "main", target_change_id: "kxyzqrpv", target_commit_id: "c0ffee123456", is_tracking_remote: false }],
-      next_cursor: ""
-    })))
-}
-
 test.beforeEach(async ({ page }) => {
   // A persisted store from an earlier test must not carry state across tests.
   await page.addInitScript(() => {
@@ -80,7 +44,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test("T1: /workspace.open renders the card, streams starting→running, and the Snapshots facet lists", async ({ page }) => {
-  await serve(page)
+  await installCloudFixture(page)
   let polls = 0
   await page.route(new RegExp(`/api/cloud/api/repos/${REPO}/workspaces(\\?.*)?$`), (route) => {
     if (route.request().method() === "POST") return route.fulfill(json(WS("pending", "allocating"), 201))
@@ -122,7 +86,7 @@ test("T1: /workspace.open renders the card, streams starting→running, and the 
 })
 
 test("T1: a degraded sign-in refuses a workspace act with the exact enable wording", async ({ page }) => {
-  await serve(page, { degraded: true })
+  await installCloudFixture(page, { degraded: true })
   await page.goto("/")
 
   await page.getByTestId("composer-input").fill("/workspace.list")

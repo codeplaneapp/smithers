@@ -36,10 +36,11 @@ interface RepoWire {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 
-/** The list a user-scoped route answers: a bare array, or one under a named key. */
+/** User lists use arrays; bookmarks use a cursor envelope. Accept legacy named lists too. */
 const arrayOf = (body: unknown, key: string): ReadonlyArray<unknown> => {
   if (Array.isArray(body)) return body
   if (isRecord(body) && Array.isArray(body[key])) return body[key]
+  if (isRecord(body) && Array.isArray(body.items)) return body.items
   return []
 }
 

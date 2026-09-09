@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
-import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
+import { installCloudFixture } from "./cloudFixture.ts"
 
 /*
  * Lane sync T1 (docs/workbench-lanes/sync.md "Exit", ADR 0005): against a
@@ -16,8 +16,9 @@ import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
  * run and the ops feed under /api/linear/{id}, the op's error is
  * `error_message` and its status one of pending|success|failed|skipped.
  *
- * The server is a double (change.spec.ts's pattern): every seam answers
- * through page.route behind /api/cloud/*. The local origin runs offline in
+ * The server is a double: the shared cloud fixture (cloudFixture.ts) answers
+ * the bootstrap, the cloud session and the Smithers Cloud inventory; this
+ * spec adds the Linear and import routes. The local origin runs offline in
  * T1, so the /api/linear-auth/* receiver (bun/LinearAuth.ts, covered by its
  * own bun tests) is doubled like every other route; window.open is stubbed
  * so the handoff URL is captured, never navigated.
@@ -82,29 +83,7 @@ const json = (body: unknown, status = 200) => ({
 
 /** Install the server double: signed in to a cloud that inventories REPO, with the Linear seam's routes. */
 const serve = async (page: Page): Promise<void> => {
-  // The last route registered wins, so the catch-all goes first.
-  await page.route("**/api/**", (route) => route.fulfill(json({ error: { code: "absent", message: "no seam" } }, 404)))
-  await page.route("**/api/bootstrap", (route) => route.fulfill(json({
-    apiVersion: 1,
-    host: "local",
-    version: "test",
-    buildSha: "test",
-    capabilities: ["agent", "identity", "cloud", "cloud.pat", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
-    authFlow: "none",
-    sandbox: { platform: "darwin", mode: "trusted-only" }
-  })))
-  await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [] })))
-  await page.route("**/api/cloud-auth/session", (route) =>
-    route.fulfill(json(SCOPED_TEST_USER_CLOUD_SESSION)))
-  await page.route("**/api/cloud/api/user/repos", (route) =>
-    route.fulfill(json({ repos: [{ owner: "smithersai", name: "smithers", full_name: REPO, default_bookmark: "main" }] })))
-  await page.route("**/api/cloud/api/user/orgs", (route) => route.fulfill(json({ orgs: [{ login: "smithersai" }] })))
-  await page.route(/\/api\/cloud\/api\/user\/workspaces(\?.*)?$/, (route) => route.fulfill(json([])))
-  await page.route(`**/api/cloud/api/repos/${REPO}/bookmarks`, (route) =>
-    route.fulfill(json({
-      items: [{ name: "main", target_change_id: "kxyzqrpv", target_commit_id: "c0ffee123456", is_tracking_remote: false }],
-      next_cursor: ""
-    })))
+  await installCloudFixture(page, { capabilities: ["agent", "identity", "cloud", "cloud.pat", "local.repositories", "local.targets", "local.terminal", "local.harnesses"] })
 
   /* The Linear seam: the create lands at /api/linear, the list at /api/integrations/linear. */
   let integrations: Array<unknown> = []

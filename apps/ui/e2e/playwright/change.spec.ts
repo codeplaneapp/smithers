@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
-import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
+import { installCloudFixture } from "./cloudFixture.ts"
 
 /*
  * Lane change T1 (docs/workbench-lanes/change.md "Exit", ADR 0003): against
@@ -12,8 +12,9 @@ import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
  * sign-in reads the change freely but is refused an agent dispatch with the
  * exact enable wording.
  *
- * The server is a double (citc.spec.ts's pattern): every seam answers
- * through page.route behind /api/cloud/*.
+ * The server is a double: the shared cloud fixture (cloudFixture.ts) answers
+ * the bootstrap, the cloud session and the Smithers Cloud inventory; this
+ * spec adds the change's own routes behind /api/cloud/*.
  */
 
 const REPO = "smithersai/smithers"
@@ -54,32 +55,7 @@ const serve = async (
   page: Page,
   options: { readonly degraded?: boolean } = {}
 ): Promise<void> => {
-  // The last route registered wins, so the catch-all goes first.
-  await page.route("**/api/**", (route) => route.fulfill(json({ error: { code: "absent", message: "no seam" } }, 404)))
-  await page.route("**/api/bootstrap", (route) => route.fulfill(json({
-    apiVersion: 1,
-    host: "local",
-    version: "test",
-    buildSha: "test",
-    capabilities: ["agent", "identity", "cloud", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
-    authFlow: "none",
-    sandbox: { platform: "darwin", mode: "trusted-only" }
-  })))
-  await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [] })))
-  await page.route("**/api/cloud-auth/session", (route) =>
-    route.fulfill(json({
-      ...SCOPED_TEST_USER_CLOUD_SESSION,
-      ...(options.degraded === true ? { scopes: "degraded" } : {})
-    })))
-  await page.route("**/api/cloud/api/user/repos", (route) =>
-    route.fulfill(json({ repos: [{ owner: "smithersai", name: "smithers", full_name: REPO, default_bookmark: "main" }] })))
-  await page.route("**/api/cloud/api/user/orgs", (route) => route.fulfill(json({ orgs: [{ login: "smithersai" }] })))
-  await page.route(/\/api\/cloud\/api\/user\/workspaces(\?.*)?$/, (route) => route.fulfill(json([])))
-  await page.route(`**/api/cloud/api/repos/${REPO}/bookmarks`, (route) =>
-    route.fulfill(json({
-      items: [{ name: "main", target_change_id: "kxyzqrpv", target_commit_id: "c0ffee123456", is_tracking_remote: false }],
-      next_cursor: ""
-    })))
+  await installCloudFixture(page, options)
   /* The change's own routes. */
   await page.route(`**/api/cloud/api/repos/${REPO}/changes/qupxosqw`, (route) => route.fulfill(json(CHANGE)))
   await page.route(`**/api/cloud/api/repos/${REPO}/changes/qupxosqw/conflicts`, (route) => route.fulfill(json([])))

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
-import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
+import type { Repo } from "@smthrs/rpc/LocalApp"
+import { installCloudFixture } from "./cloudFixture.ts"
 
 /*
  * Lane piper T1 (docs/workbench-lanes/piper.md "Exit", ADR 0001): the app
@@ -9,9 +10,9 @@ import { SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
  * inventory), /files.read README.md renders the card, and the card header
  * carries the global address and the position the read was taken at.
  *
- * The server is a double (tabs.spec.ts's pattern): every seam answers
- * through page.route — the local repos read, the cloud session, the Smithers Cloud
- * inventory behind /api/cloud/*, and the repo-files read.
+ * The server is a double: the shared cloud fixture (cloudFixture.ts) answers
+ * the bootstrap, the cloud session and the Smithers Cloud inventory behind
+ * /api/cloud/*, this spec adds the local checkout and the repo-files read.
  */
 
 const SMITHERS_REPO = {
@@ -28,7 +29,7 @@ const SMITHERS_REPO = {
     reason: "ok",
     workspaces: [{ path: ".", title: "smithers" }]
   }
-}
+} satisfies Repo
 
 const json = (body: unknown, status = 200) => ({
   status,
@@ -38,30 +39,7 @@ const json = (body: unknown, status = 200) => ({
 
 /** Install the server double: ~/smithers open locally, signed in to a cloud that inventories smithersai/smithers. */
 const serve = async (page: Page): Promise<void> => {
-  // The last route registered wins, so the catch-all goes first.
-  await page.route("**/api/**", (route) => route.fulfill(json({ error: { code: "absent", message: "no seam" } }, 404)))
-  await page.route("**/api/bootstrap", (route) => route.fulfill(json({
-    apiVersion: 1,
-    host: "local",
-    version: "test",
-    buildSha: "test",
-    capabilities: ["agent", "identity", "cloud", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
-    authFlow: "none",
-    sandbox: { platform: "darwin", mode: "trusted-only" }
-  })))
-  await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [SMITHERS_REPO] })))
-  await page.route("**/api/cloud-auth/session", (route) =>
-    route.fulfill(json(SCOPED_TEST_USER_CLOUD_SESSION)))
-  await page.route("**/api/cloud/api/user/repos", (route) =>
-    route.fulfill(json({
-      repos: [{ owner: "smithersai", name: "smithers", full_name: "smithersai/smithers", default_bookmark: "main" }]
-    })))
-  await page.route("**/api/cloud/api/user/orgs", (route) => route.fulfill(json({ orgs: [{ login: "smithersai" }] })))
-  await page.route("**/api/cloud/api/repos/smithersai/smithers/bookmarks", (route) =>
-    route.fulfill(json({
-      bookmarks: [{ name: "main", target_change_id: "kxyzqrpv", target_commit_id: "c0ffee123456" }]
-    })))
-  await page.route("**/api/cloud/api/user/workspaces", (route) => route.fulfill(json({ workspaces: [] })))
+  await installCloudFixture(page, { localRepos: [SMITHERS_REPO] })
   await page.route("**/api/repo/files", (route) =>
     route.fulfill(json({ kind: "file", path: "README.md", size: 10, content: "# Smithers\n", truncated: false, binary: false })))
 }

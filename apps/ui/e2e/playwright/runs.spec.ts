@@ -1,24 +1,19 @@
 import { expect, test } from "@playwright/test"
 import type { Locator, Page } from "@playwright/test"
 import { CODING_PLAN } from "../../src/mainview/cards/fixtures/CodingPlan"
-import { SCOPED_TEST_USER, SCOPED_TEST_USER_CLOUD_SESSION } from "./identity.ts"
+import { installCloudFixture } from "./cloudFixture.ts"
 
 /*
  * Lane runs T1 (docs/workbench-lanes/runs.md "Exit"): launch a fixture flow,
  * steer it, stop it, and see it in the run inbox — the whole lifecycle over
- * the workspace gateway, with the server as a double (piper.spec.ts's
- * pattern): every seam answers through page.route, and the RPC double
+ * the workspace gateway, with the server as a double: the shared cloud
+ * fixture (cloudFixture.ts) answers the bootstrap, the sessions and the
+ * Smithers Cloud inventory, this spec adds the gateway, and the RPC double
  * records each procedure so the test asserts the wire, not just the pixels.
  */
 
 const REPO = "smithersai/smithers"
 const RUN_ID = "run-e2e"
-
-const json = (body: unknown, status = 200) => ({
-  status,
-  contentType: "application/json",
-  body: JSON.stringify(body)
-})
 
 interface RpcCall {
   readonly repo: string
@@ -43,36 +38,19 @@ const summaryRow = (status: string) => ({
   diagnosis: "Verdict   done."
 })
 
+const json = (body: unknown, status = 200) => ({
+  status,
+  contentType: "application/json",
+  body: JSON.stringify(body)
+})
+
 /** Install the server double: signed in as the scoped-down user, one loaded repo, one gateway that accepts everything. */
 const serve = async (page: Page, journal: ReadonlyArray<Record<string, unknown>> = []): Promise<{ rpc: Array<RpcCall> }> => {
   const rpc: Array<RpcCall> = []
   let planned: { flowId: string; input: unknown } | undefined
   /** The engine's own accounting: a steer the gateway took is pending until the next turn. */
   let steeringPending = 0
-  // The last route registered wins, so the catch-all goes first.
-  await page.route("**/api/**", (route) => route.fulfill(json({ error: { code: "absent", message: "no seam" } }, 404)))
-  await page.route("**/api/bootstrap", (route) => route.fulfill(json({
-    apiVersion: 1,
-    host: "local",
-    version: "test",
-    buildSha: "test",
-    capabilities: ["agent", "identity", "cloud", "local.repositories"],
-    authFlow: "none",
-    sandbox: { platform: "darwin", mode: "trusted-only" }
-  })))
-  await page.route("**/api/repos", (route) => route.fulfill(json({ repos: [] })))
-  await page.route("**/api/auth/session", (route) =>
-    route.fulfill(json(SCOPED_TEST_USER)))
-  await page.route("**/api/cloud-auth/session", (route) =>
-    route.fulfill(json(SCOPED_TEST_USER_CLOUD_SESSION)))
-  await page.route("**/api/cloud/api/user/repos", (route) =>
-    route.fulfill(json({
-      repos: [{ owner: "smithersai", name: "smithers", full_name: REPO, default_bookmark: "main" }]
-    })))
-  await page.route("**/api/cloud/api/user/orgs", (route) => route.fulfill(json({ orgs: [{ login: "smithersai" }] })))
-  await page.route("**/api/cloud/api/repos/smithersai/smithers/bookmarks", (route) =>
-    route.fulfill(json({ bookmarks: [{ name: "main", target_change_id: "kxyzqrpv", target_commit_id: "c0ffee" }] })))
-  await page.route("**/api/cloud/api/user/workspaces", (route) => route.fulfill(json({ workspaces: [] })))
+  await installCloudFixture(page, { capabilities: ["agent", "identity", "cloud", "local.repositories"] })
   await page.route("**/api/workflow/provision", (route) =>
     route.fulfill(json({ status: "ready", repo: REPO, gatewayId: "gw-1" })))
   await page.route("**/api/workflow/rpc", async (route) => {

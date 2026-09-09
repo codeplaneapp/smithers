@@ -597,6 +597,16 @@ commands execute there. The suite retains generated run histories and never
 removes a host checkout's existing history directory. Only its own temporary
 server directories are automatically cleaned up.
 
+The piper, runs, citc, change and sync browser specs install common routes with
+`e2e/playwright/cloudFixture.ts`. Local bootstrap, repository and cloud-session
+responses use the shared RPC contracts. Cloud inventory lists use bare arrays;
+bookmarks use `{ items, next_cursor }`. Repository loading reads that cursor
+envelope when resolving the default bookmark head. Fixture options override
+capabilities, local repositories, cloud inventory, per-repository bookmarks,
+workspaces and degraded sessions. Register scenario routes after the installer
+to override its defaults. Route matching uses exact pathnames and accepts query
+strings. `cloudFixture.spec.ts` checks these contracts and override isolation.
+
 The default Playwright host also owns a temporary home/state directory and
 does not discover installed harnesses, inspect their account files, or pass
 ambient credentials to test terminal sessions. Its harness table reports the
