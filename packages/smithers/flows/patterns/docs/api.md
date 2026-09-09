@@ -491,6 +491,16 @@ calls. A very large bound builds a very large graph before anything runs. For
 an unbounded loop, use the `run` half under an external scheduler instead of
 unrolling it in `make`.
 
+A bound that unrolls into a sequenced chain is capped a second way. Core
+refuses a plan nested past `Graph.maximumGraphDepth`, which is 512 levels, and
+each chained call costs one level, so a chain reaches 511 declared calls, or
+255 when a unit declares two of them. `Loop.make` refuses a `maxIterations`
+past that limit at the declaration, with an `invalid_decorator` `PatternError`
+naming the option and the limit. Every other pattern reaches the ceiling as a
+`plan_too_deep` `GraphBuildError` from `Graph.build`, which carries no
+message. The limit counts the chain alone, so deeper member flows or an
+enclosing unrolled pattern lower it.
+
 ## Entry points
 
 The root exports each module as a namespace, and every module is also

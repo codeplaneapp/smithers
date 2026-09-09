@@ -84,6 +84,13 @@ reads `previous`. See [Inline callbacks and inference](#inline-callbacks-and-inf
 `invalid_decorator` at declaration; `run` fails with the same error before the
 first body runs.
 
+`make` unrolls the bound, so it is capped a second time by the plan depth
+limit: 511 iterations for a body alone, 255 when an `until` flow is declared
+too. `make` refuses a bound past that with the same `invalid_decorator` error,
+naming the limit. `run` takes any positive safe integer, because it iterates
+instead of unrolling. See
+[Declaration size](./api.md#declaration-size).
+
 ### Ralph
 
 `Loop.ralph` and `Loop.runRalph` are the loop with no separate predicate flow:

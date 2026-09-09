@@ -91,6 +91,33 @@ describe("Loop", () => {
       expect(ran).toBe(1)
     }))
 
+  it("builds the deepest bound it accepts and refuses the next one", () => {
+    expect(Graph.nodes(Graph.build(Loop.ralph({ body, maxIterations: 511 }), "seed")).length).toBeGreaterThan(0)
+    expect(() => Loop.ralph({ body, maxIterations: 512 })).toThrow(
+      new PatternError({
+        code: "invalid_decorator",
+        message: "Loop maxIterations must be at most 511 to stay inside the plan depth limit, received 512"
+      })
+    )
+    expect(Graph.nodes(Graph.build(Loop.make({ body, until, maxIterations: 255 }), "seed")).length).toBeGreaterThan(0)
+    expect(() => Loop.make({ body, until, maxIterations: 256 })).toThrow(
+      new PatternError({
+        code: "invalid_decorator",
+        message: "Loop maxIterations must be at most 255 to stay inside the plan depth limit, received 256"
+      })
+    )
+  })
+
+  it.effect("takes a bound past the declaration ceiling at runtime", () =>
+    Effect.gen(function*() {
+      const result = yield* Loop.runRalph("goal", {
+        maxIterations: 100_000,
+        body: ({ iteration }) => Effect.succeed({ done: iteration === 3, iteration })
+      })
+      expect(result.iterations).toBe(3)
+      expect(result.exhausted).toBe(false)
+    }))
+
   it.effect("returns the last value when the bound is reached under return-last", () =>
     Effect.gen(function*() {
       const result = yield* Loop.run(0, {

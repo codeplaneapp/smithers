@@ -5,7 +5,7 @@
  *
  * @since 0.1.0
  */
-import { Annotations, Effects, Flow, Node } from "@smthrs/core"
+import { Annotations, Effects, Flow, Graph, Node } from "@smthrs/core"
 import type * as Context from "effect/Context"
 import * as Schema from "effect/Schema"
 import { PatternError } from "../PatternError.ts"
@@ -80,6 +80,35 @@ export const safeIntegerPriorityRefusal = (
       code: "invalid_decorator",
       message: `${pattern} priority for member "${member}" must be a safe integer, received ${value}`
     })
+
+/**
+ * Refuses a declared bound whose unrolling can never be built into a plan.
+ *
+ * A pattern that unrolls a bound sequences `callsPerUnit` calls per unit into
+ * a left-nested chain, so the plan nests one level deeper per call. Core
+ * refuses a plan nested past `Graph.maximumGraphDepth` with a `plan_too_deep`
+ * `GraphBuildError` carrying no message, which names neither the option nor
+ * the pattern that produced it. Refusing at the declaration names both.
+ *
+ * The limit counts the chain alone. Deeper member flows, or an enclosing
+ * pattern that unrolls this one, spend the same budget, so a bound under the
+ * limit can still be refused by `Graph.build`.
+ *
+ * @since 1.0.0
+ * @private
+ */
+export const sequencedBoundRefusal = (
+  pattern: string,
+  option: string,
+  value: number,
+  callsPerUnit: number
+): PatternError | undefined => {
+  const limit = Math.floor((Graph.maximumGraphDepth - 1) / callsPerUnit)
+  return value <= limit ? undefined : new PatternError({
+    code: "invalid_decorator",
+    message: `${pattern} ${option} must be at most ${limit} to stay inside the plan depth limit, received ${value}`
+  })
+}
 
 const normalized = (values: Iterable<string>): ReadonlyArray<string> => [...new Set(values)].sort()
 

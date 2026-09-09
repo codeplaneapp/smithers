@@ -21,6 +21,7 @@
 import { Flow, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { sequencedBoundRefusal } from "./internal/Compose.ts"
 import { PatternError } from "./PatternError.ts"
 
 /**
@@ -147,7 +148,11 @@ const bound = (maxIterations: number): PatternError | undefined =>
  * know which iteration a run stops at. Reaching the bound is a value, not a
  * declared failure: core node declarations have no failure arm, so the
  * `"fail"` policy is applied by {@link run}.
- * A very large `maxIterations` builds a very large graph before anything runs.
+ * A very large `maxIterations` builds a very large graph before anything runs,
+ * and a bound whose chain nests past core's plan depth limit is refused here
+ * rather than at `Graph.build`: 511 iterations without an `until` flow, 255
+ * with one. {@link run} takes the same bounds without unrolling them, so an
+ * unbounded loop belongs there.
  *
  * @category constructors
  * @since 0.1.0
@@ -157,7 +162,10 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   // these snapshots and never the caller's options again.
   const declared = { body: options.body, until: options.until }
   const maxIterations = options.maxIterations
-  const invalid = bound(maxIterations)
+  // One node per declared call, chained, so the plan nests one level per call:
+  // a body alone spends one level an iteration, a body plus `until` two.
+  const invalid = bound(maxIterations) ??
+    sequencedBoundRefusal("Loop", "maxIterations", maxIterations, declared.until === undefined ? 1 : 2)
   if (invalid !== undefined) throw invalid
   const onMaxReached = options.onMaxReached ?? defaultOnMaxReached
   const captures = {
