@@ -336,8 +336,8 @@ lanes that ran before the field existed, and `mixed` — which is fatal on its
 own, because a lane measured under two testbed conditions is not one
 measurement.
 
-**A lane whose claim is `none` is asserted, not described.** Two things must
-hold and the report exits non-zero if either does not:
+**A lane whose claim is `none` is asserted, not described.** All obligations
+must hold or the report exits non-zero:
 
 - **every row observed `none`.** A row that observed `bridge`, or that carries
   no observation at all, is named under "The testbed was not sealed" and fails
@@ -349,8 +349,12 @@ hold and the report exits non-zero if either does not:
   by construction, and a non-zero one means the constraint did not hold
   somewhere the ledger did not see. Either way the lane fails and the offenders
   are named.
+- **every attempted run has a transcript.** A missing transcript fails even
+  when the ledger recorded `none`. Unattempted population rows owe no trace.
+- **zero web-search tool lines.** Host-side web searches bypass the container's
+  network setting and fail the seal independently of in-container fetches.
 
-`--require none` applies both assertions whatever the ledger claims, so an
+`--require none` applies all assertions whatever the ledger claims, so an
 operator can gate a lane before reading a number out of it. Without the flag a
 `bridge` or `unrecorded` lane still renders exactly as it did before: those
 lanes are read back off their traces, they are reported with the hole they have,
@@ -376,6 +380,9 @@ node breach-scan.mjs --ledger fullbench/rerun-r98/manifest.jsonl \
 It imports `egress`, `inContainerEgress`, `provedUnnetworked` and
 `countedBreaches` from `compare-codex-lanes.mjs` rather than restating them, so
 the two reports cannot drift apart on what counts as an attempt or a breach. The
+comparison also uses `traceFailures` from `breach-scan.mjs` for the shared
+missing-trace and web-search obligations. A Sealed headline requires an empty
+failure list after all obligations have been checked. The
 one thing that differs per arm is **where the
 trace lives**: a codex run writes one transcript at `logs/<id>.run.log`, and a
 flows run writes a driver log of that name plus a journal at
@@ -430,6 +437,11 @@ outcome, and the reading fails closed:
   in the trace, which is the only way a running container can acquire a network,
   and it is never granted to a container that is shown refusing nothing. A quiet
   trace proves nothing and is given nothing.
+
+Refusal evidence stays within its command's bounded output window and literal
+container identity. A refusal in `swb` cannot excuse a fetch in `otherbox`.
+When the parser cannot identify a literal container, only that command's own
+refusal can excuse it; unresolved shell expressions never share evidence.
 
 Anywhere the container was not observed `none`, the old rule stands untouched, so
 no `bridge` or unrecorded lane's report moves.

@@ -38,11 +38,10 @@
  * - **A kernel seal is asserted, not described.** From 2026-08-24 a lane may run
  *   its testbed container on `--network none`, and each run records what
  *   `docker inspect` said its container was actually on. A lane whose ledger
- *   claims `none` has to satisfy both halves — every row observed `none`, and
- *   zero in-container fetches across every transcript — or `main` exits
- *   non-zero. The second half is redundant under the first, which is the point:
- *   the breach column comes out zero *by construction*, so a non-zero one means
- *   the constraint did not hold somewhere the ledger did not see.
+ *   claims `none` must observe `none` on every attempted row, retain every
+ *   transcript, and show no counted container breaches or web searches, or
+ *   `main` exits non-zero. The trace obligations also cover host-side tools
+ *   and other containers that the testbed's network observation cannot seal.
  *
  * It reads two codex ledgers, the flows ledger and the sealed lane's own
  * transcripts. No evaluator report, no journal, no clock, no network. Running it
@@ -52,6 +51,7 @@
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { traceFailures } from "./breach-scan.mjs"
 import { attempted, population } from "./lib/codex-backfill-queue.mjs"
 import { denominators, isExcluded, renderExclusions } from "./lib/excluded.mjs"
 
@@ -220,7 +220,11 @@ export const inContainerEgress = (text) => {
     const next = text.indexOf("docker exec", start)
     const end = Math.min(next === -1 ? text.length : next, start + 4000)
     const window = text.slice(start, end)
-    read.push({ command, refused: SEAL_REFUSALS.some((pattern) => pattern.test(window)) })
+    // Only literal identities can share evidence. An option or a shell
+    // expression we cannot resolve gets only its own command's refusal.
+    const identity = command.match(/^docker exec\s+(?:"([\w][\w.-]*)"|'([\w][\w.-]*)'|([\w][\w.-]*))(?=\s)/u)
+    const container = identity?.[1] ?? identity?.[2] ?? identity?.[3]
+    read.push({ command, container, start, end, refused: SEAL_REFUSALS.some((pattern) => pattern.test(window)) })
   }
   return read
 }
@@ -240,14 +244,17 @@ export const inContainerEgress = (text) => {
  * its own — it takes a `docker network connect` from outside, which is a command
  * and would be in the trace. The guard is therefore the whole rule: **any**
  * `docker network connect` in the trace withdraws it, and an instance whose
- * trace shows nothing refused never earns it. A quiet trace proves nothing and
- * is given nothing.
+ * trace shows nothing refused never earns it. Evidence is bound to the literal
+ * container identity: every container in the supplied attempts must have its
+ * own refusal. A quiet trace proves nothing and is given nothing.
  *
  * @category conversions
  * @since 0.1.0
  */
 export const provedUnnetworked = (text, read) =>
-  read.some((one) => one.refused) && !/docker\s+network\s+connect/u.test(text)
+  read.length > 0 && !/docker\s+network\s+connect/u.test(text)
+  && read.every((one) => one.container !== undefined
+    && read.some((evidence) => evidence.container === one.container && evidence.refused))
 
 /**
  * The in-container fetches that count against a lane, after the seal is read.
@@ -265,8 +272,9 @@ export const countedBreaches = (text, observed) => {
   if (text === undefined) return []
   const read = inContainerEgress(text)
   if (observed !== "none") return read.map((one) => one.command)
-  if (provedUnnetworked(text, read)) return []
-  return read.filter((one) => !one.refused).map((one) => one.command)
+  return read.filter((one) => !one.refused
+    && !provedUnnetworked(text, read.filter((evidence) => evidence.container === one.container)))
+    .map((one) => one.command)
 }
 
 const readLog = (logsDirectory, id) => {
@@ -389,7 +397,13 @@ export const compareLanes = (
   // grading environment and never a licence to run one instance networked.
   const sealedTestbed = testbed(rows)
   const breachRows = rows.filter((row) => row.countedBreaches.length > 0)
-  const failures = sealFailures({ breaches: breachRows, required, testbedState: sealedTestbed })
+  const failures = sealFailures({
+    breaches: breachRows,
+    required,
+    testbedState: sealedTestbed,
+    searched: rows.filter((row) => (row.egress?.webSearches.length ?? 0) > 0),
+    untraced: rows.filter((row) => row.attempted && row.egress === undefined)
+  })
 
   return {
     // Which sealed lane this is. The script reads whichever ledger and
@@ -464,7 +478,8 @@ export const compareLanes = (
  *
  * A `bridge` or `unrecorded` lane owes nothing new: those are the lanes read
  * back off their traces, reported with the hole they have, and nothing about
- * them is retroactively re-graded. A `none` lane owes two things, and both are
+ * them is retroactively re-graded. A `none` lane owes observed isolation,
+ * complete traces, and no container breaches or web searches. These are
  * assertions rather than descriptions.
  *
  * `require` forces the `none` obligations whatever the ledger claims, which is
@@ -475,7 +490,7 @@ export const compareLanes = (
  * @category conversions
  * @since 0.1.0
  */
-export const sealFailures = ({ breaches, required, testbedState }) => {
+export const sealFailures = ({ breaches, required, searched = [], testbedState, untraced = [] }) => {
   const failures = []
   if (testbedState.claim === "mixed") {
     failures.push({
@@ -509,6 +524,7 @@ export const sealFailures = ({ breaches, required, testbedState }) => {
       detail: `${row.id} fetched from inside its testbed container, which a --network none container cannot do`
     })
   }
+  failures.push(...traceFailures({ searched, untraced }))
   return failures
 }
 
@@ -585,8 +601,9 @@ export const render = (result) => {
   if (seal.failures.length === 0) {
     if (asserted) {
       lines.push(
-        "**Sealed by construction.** Every row observed `none`, and no transcript contains an in-container fetch."
-          + " The second is redundant given the first, which is the point: the breach count below has to be zero,"
+        "**Sealed by construction.** Every attempted row observed `none` and has a transcript."
+          + " No transcript contains a counted in-container breach or a web search."
+          + " The traces cross-check the observation: the breach count below has to be zero,"
           + " and a non-zero one would mean the constraint did not hold somewhere the ledger did not see."
       )
     }
@@ -596,7 +613,8 @@ export const render = (result) => {
     lines.push(
       `**${seal.failures.length} failed assertions.** ${
         required === "none" ? "`--require none` was passed, so" : "This lane's rows claim `none`, so"
-      } every container had to be observed on \`none\` and no transcript could contain an in-container fetch.`
+      } every container had to be observed on \`none\`, every attempted run had to leave a transcript,`
+        + " and no transcript could contain a counted in-container breach or a web search."
         + " **No number in this report is a sealed number.**"
     )
     lines.push("")

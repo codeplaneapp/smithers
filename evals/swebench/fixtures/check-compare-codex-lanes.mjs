@@ -29,6 +29,7 @@
  * Spends nothing, needs no docker, needs no dataset.
  */
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -207,6 +208,56 @@ try {
   const labelled = render({ ...result, label: "`r90sh` (sealed, high effort)" })
   assert.match(labelled, /\| codex `r90sh` \(sealed, high effort\) \|/u)
   assert.match(labelled, /\| instance \| flows `r90` \| codex `r90c` \| codex `r90sh` \| sealed wall \(s\) \|/u)
+
+  // Neither a missing transcript nor host-side web search can earn a seal,
+  // even when the testbed observation is none. Pin the CLI gate as well.
+  const gateManifest = jsonl(join(temporary, "gate-flows.jsonl"), [
+    ...flowsRows("a__a-1", "resolved"),
+    ...flowsRows("not__attempted-1", "resolved")
+  ])
+  const gateLedger = jsonl(join(temporary, "gate-codex.jsonl"), [
+    codexRow("a__a-1", "resolved", { testbedNetwork: "none", testbedNetworkObserved: "none" })
+  ])
+  const gateLogs = join(temporary, "gate-logs")
+  mkdirSync(gateLogs)
+  const gateCases = [
+    { name: "missing transcript", text: undefined, kind: "missing trace" },
+    { name: "host web search", text: "web search: upstream fix\n", kind: "web search" },
+    { name: "complete quiet trace", text: "pytest -q\nok\n", kind: undefined },
+    {
+      name: "another container fetched",
+      text: "docker exec swb curl https://example.com/one.patch\n"
+        + "curl: (6) Could not resolve host: example.com\n"
+        + "docker exec otherbox curl https://example.com/two.patch\ndiff --git a/a b/a\n",
+      kind: "in-container egress"
+    }
+  ]
+  const gateFailures = []
+  for (const entry of gateCases) {
+    if (entry.text !== undefined) writeFileSync(join(gateLogs, "a__a-1.run.log"), entry.text)
+    for (const required of [undefined, "none"]) {
+      const gated = compareLanes({
+        manifestPath: gateManifest, netPath: gateLedger, sealedPath: gateLedger,
+        logsDirectory: gateLogs, require: required
+      })
+      const expected = entry.kind === undefined ? [] : [entry.kind]
+      if (JSON.stringify(gated.seal.failures.map((failure) => failure.kind)) !== JSON.stringify(expected)) {
+        gateFailures.push(`${entry.name} (require ${required}): ${JSON.stringify(gated.seal.failures)}`)
+      }
+      if (render(gated).includes("**Sealed by construction.**") !== (entry.kind === undefined)) {
+        gateFailures.push(`${entry.name}: incorrect Sealed headline`)
+      }
+    }
+    const cli = spawnSync(process.execPath, [
+      resolve(import.meta.dirname, "../compare-codex-lanes.mjs"),
+      "--manifest", gateManifest, "--net", gateLedger, "--sealed", gateLedger,
+      "--logs", gateLogs, "--require", "none", "--json"
+    ], { encoding: "utf8", timeout: 30_000 })
+    if (cli.status !== (entry.kind === undefined ? 0 : 1)) {
+      gateFailures.push(`${entry.name}: CLI exited ${cli.status}: ${cli.stderr}`)
+    }
+  }
+  assert.deepEqual(gateFailures, [], "every seal obligation gates the verdict and exit status")
 
   console.log(
     "check-compare-codex-lanes: an eval error is never a loss, an exclusion is in no movement set and in both"

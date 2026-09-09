@@ -159,6 +159,23 @@ export const traceOf = (id, { logs, journals }) => {
 }
 
 /**
+ * Trace obligations shared by the one-lane scan and the codex comparison.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const traceFailures = ({ searched, untraced }) => {
+  const failures = []
+  if (searched.length > 0) {
+    failures.push({ kind: "web search", detail: `${searched.length} run(s) used a web-search tool` })
+  }
+  if (untraced.length > 0) {
+    failures.push({ kind: "missing trace", detail: `${untraced.length} run(s) left no trace to scan` })
+  }
+  return failures
+}
+
+/**
  * The scan itself: one row per instance, plus the two assertions.
  *
  * @category constructors
@@ -215,8 +232,7 @@ export const scan = ({ journals, ledger, logs, require: required }) => {
       failures.push(`${notSealed.length} container(s) were not observed \`none\``)
     }
     if (breached.length > 0) failures.push(`${breached.length} run(s) fetched from inside the testbed`)
-    if (searched.length > 0) failures.push(`${searched.length} run(s) used a web-search tool`)
-    if (untraced.length > 0) failures.push(`${untraced.length} run(s) left no trace to scan`)
+    failures.push(...traceFailures({ searched, untraced }).map((failure) => failure.detail))
   }
   return {
     asserted,

@@ -231,6 +231,8 @@ try {
     join(breachLogs, "a__a-1.run.log"),
     "docker exec box bash -lc 'curl -fsSL https://github.com/o/r/pull/1.patch'\n"
   )
+  // Keep this case about the breach; the other attempted row owes a trace too.
+  writeFileSync(join(breachLogs, "b__b-2.run.log"), "pytest -q\n")
   const contradicted = compareLanes({
     manifestPath: manifest,
     netPath: net,

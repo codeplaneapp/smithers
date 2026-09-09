@@ -34,7 +34,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { foldLedger, render, scan } from "../breach-scan.mjs"
-import { inContainerEgress } from "../compare-codex-lanes.mjs"
+import { countedBreaches, inContainerEgress } from "../compare-codex-lanes.mjs"
 
 const root = resolve(import.meta.dirname, "..")
 const temporary = mkdtempSync(join(tmpdir(), "flows-swebench-breach-"))
@@ -184,6 +184,41 @@ try {
   assert.equal(quiet.rows[0].unnetworked, true)
   assert.equal(quiet.totals.breaches, 0, "a container shown to have no DNS did not fetch on the quiet command either")
   assert.deepEqual(quiet.failures, [])
+
+  // A refusal in the measured testbed cannot clear a fetch in another
+  // container reached through the same Docker socket.
+  const otherTrace = "docker exec swb bash -lc 'curl https://example.com/one.patch'\n"
+    + "curl: (6) Could not resolve host: example.com\n"
+    + "docker exec otherbox bash -lc 'curl https://example.com/two.patch'\n"
+    + "diff --git a/a b/a\n"
+  writeFileSync(join(quietDirectory, "logs", "a__a-1.run.log"), otherTrace)
+  const other = scan({ ledger: quietLedger, logs: join(quietDirectory, "logs"), require: "none" })
+  assert.equal(other.totals.breaches, 1, "a refused fetch in swb does not clear otherbox")
+  assert.equal(other.totals.inContainerAttempts, 2)
+  assert.equal(other.totals.inContainerRefused, 1)
+  assert.equal(other.rows[0].unnetworked, false)
+  assert.match(other.rows[0].breaches[0], /^docker exec otherbox/u)
+  assert.ok(other.failures.some((failure) => failure.includes("fetched from inside the testbed")))
+  assert.ok(!render(other, { label: "x", ledger: quietLedger }).includes("**Verdict: sealed.**"))
+  const otherRead = inContainerEgress(otherTrace)
+  assert.deepEqual(otherRead.map((one) => one.container), ["swb", "otherbox"])
+  assert.deepEqual(otherRead.map((one) => one.refused), [true, false])
+  assert.ok(otherRead[0].end <= otherTrace.indexOf("docker exec otherbox"))
+  // Refusal order and unresolved identities must not restore the exemption.
+  const otherStart = otherTrace.indexOf("docker exec otherbox")
+  const reversedTrace = otherTrace.slice(otherStart) + otherTrace.slice(0, otherStart)
+  assert.equal(countedBreaches(reversedTrace, "none").length, 1)
+  for (const target of ["$BOX", "-i swb"]) {
+    const unknownTrace = otherTrace.replace("docker exec swb", `docker exec ${target}`)
+      .replace("docker exec otherbox", `docker exec ${target}`)
+    assert.equal(countedBreaches(unknownTrace, "none").length, 1, "unknown identities cannot share refusals")
+  }
+
+  writeFileSync(join(quietDirectory, "logs", "a__a-1.run.log"), "web search: upstream fix\n")
+  const searched = scan({ ledger: quietLedger, logs: join(quietDirectory, "logs"), require: "none" })
+  assert.equal(searched.totals.webSearches, 1)
+  assert.deepEqual(searched.failures, ["1 run(s) used a web-search tool"])
+  assert.ok(!render(searched, { label: "x", ledger: quietLedger }).includes("**Verdict: sealed.**"))
 
   // -------------------------------------------------------------------------
   // ...and that rule is withdrawn the moment the trace shows a network being
