@@ -32,12 +32,20 @@ lines. The result is:
 out of a numbered read carries the numbers with it, so every `edit` built from
 one misses. Line numbers are facts about the page, so they are page fields.
 
+Source lines split on `\n`. A trailing `\r` is part of the line, including in
+CRLF files. Pages omit the final `\n` and retain every `\r`. For example,
+`"one\r\ntwo\r\n"` reads as `"one\r\ntwo\r"`. Copy that text unchanged into
+`oldString` or `expect`. Replacement text is also literal: retain the `\r`
+bytes in `newString` to keep CRLF endings, including the last line of a range.
+A line-range edit leaves the final `\n` outside the replaced span.
+
 A page cut by the byte budget ends on a whole line rather than handing back a
 fragment that looks like an anchor and is not one. A line longer than 2,000
 characters is clipped, and the notice says so by name, because a clipped line
 cannot be an anchor either.
 
-Reading an empty file returns an empty page. Only an `offset` past the end is
+Reading an empty file returns an empty page with `startLine: 1`, `endLine: 0`,
+and `totalLines: 0`. Only an `offset` past the end is
 `offset_out_of_range`. A directory is `is_directory`; a file holding a NUL byte
 or invalid UTF-8 is `binary_file`.
 

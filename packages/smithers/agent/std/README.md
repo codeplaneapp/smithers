@@ -62,6 +62,8 @@ const program = Read.run({ path: "/workspace/notes.md" }).pipe(
 // Provide the kernel FileSystem and Path layers in the host.
 ```
 
+`Read.content` preserves source-line bytes, including trailing `\r` in CRLF files, and omits the page's final `\n`. Copy it unchanged into an edit anchor and retain the `\r` bytes in replacement text to keep CRLF endings.
+
 `Manifest.flows` is the declaration registry, `Manifest.handlers` contains directly executable handlers, `Manifest.effectsFor` narrows a declaration for one decoded input, and `Manifest.readOnly` is the canonical read-only projection. `@smthrs/std/package.json` is also exported; `internal/*` and nested `*/index` subpaths are blocked.
 
 The root entry point is Node-only: `NodeLanguageServer` pulls in `node:url`. The four subpaths `@smthrs/std/Grep`, `@smthrs/std/Glob`, `@smthrs/std/Search` and `@smthrs/std/PortableSearch` are browser-safe, because nothing any of them imports reaches a Node built-in.

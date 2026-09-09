@@ -125,13 +125,15 @@ export const truncateBytes = (
 }
 
 /**
- * Splits text into source lines without counting a terminal newline as a line.
+ * Splits on LF without counting a terminal LF as a line.
+ * Carriage returns remain part of each line, including the CR in CRLF, so
+ * joining a page with LF preserves its bytes except for the final LF.
  *
  * @category parsing
  * @since 0.1.0
  */
 export const sourceLines = (text: string): ReadonlyArray<string> => {
-  const lines = text.length === 0 ? [] : text.split(/\r?\n/)
+  const lines = text.length === 0 ? [] : text.split("\n")
   if (text.endsWith("\n")) lines.pop()
   return lines
 }

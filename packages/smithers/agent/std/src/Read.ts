@@ -12,7 +12,8 @@
  *
  * Every line in `content` is a whole line: a page cut short by the byte budget
  * drops its trailing partial line rather than handing back a fragment that looks
- * like an anchor and is not one.
+ * like an anchor and is not one. CRLF lines retain their trailing CR; only
+ * the page's final LF is omitted.
  *
  * @since 0.1.0
  */
@@ -65,10 +66,12 @@ export const Input = Schema.Struct({
  */
 export const Output = Schema.Struct({
   content: Schema.String.annotate({
-    description: "Raw page text, byte-for-byte as the file holds it and never line-number prefixed"
+    description: "Raw page text, preserving CR bytes and omitting the final LF; never line-number prefixed"
   }),
   startLine: Schema.Number.annotate({ description: "First returned 1-based line number" }),
-  endLine: Schema.Number.annotate({ description: "Last returned 1-based line number" }),
+  endLine: Schema.Number.annotate({
+    description: "Last returned 1-based line number, or startLine - 1 when no lines are returned"
+  }),
   totalLines: Schema.Number.annotate({ description: "Total number of source lines" }),
   truncated: Schema.Boolean.annotate({ description: "Whether displayed output was truncated" }),
   notice: Schema.optional(Schema.String.annotate({ description: "Truncation disclosure" }))
@@ -209,7 +212,7 @@ export const run = Effect.fn("Read.run")(function*(
     ? rendered.text.slice(0, Math.max(0, rendered.text.lastIndexOf("\n")))
     : rendered.text
   const shown = rendered.truncated ? (whole === "" ? 0 : whole.split("\n").length) : lines.length
-  const endLine = page.startLine + Math.max(0, shown - 1)
+  const endLine = page.startLine + shown - 1
   const truncated = longLinesTruncated || rendered.truncated || page.endLine < page.totalLines
   const clipped = longLinesTruncated
     ? ` Lines longer than ${MAX_LINE_CHARS} Unicode scalar values are clipped, so such a line is not an edit anchor.`

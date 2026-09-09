@@ -1,6 +1,7 @@
 import { Cause, Effect, Exit, FileSystem, Layer, Option } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Edit from "../src/Edit.ts"
+import * as Read from "../src/Read.ts"
 import { layer } from "./TestLayers.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
@@ -53,6 +54,36 @@ const refusal = (
   ))
 
 describe("Edit anchoring", () => {
+  it.each(["oldString", "expect"] as const)(
+    "accepts a CRLF read page as %s and preserves its bytes",
+    async (anchor) => {
+      const content = await execute(Effect.provide(
+        Effect.gen(function*() {
+          const page = yield* Read.run({ path: "/crlf.txt", offset: 2, limit: 2 })
+          yield* Edit.run({
+            path: "/crlf.txt",
+            ...(anchor === "oldString"
+              ? { oldString: page.content }
+              : { startLine: page.startLine, endLine: page.endLine, expect: page.content }),
+            newString: page.content.replace("two", "TWO")
+          })
+          const fileSystem = yield* FileSystem.FileSystem
+          return yield* fileSystem.readFileString("/crlf.txt")
+        }),
+        layer({ files: { "/crlf.txt": "one\r\ntwo\r\nthree\r\nfour\r\n" } })
+      ))
+      expect(content).toBe("one\r\nTWO\r\nthree\r\nfour\r\n")
+    }
+  )
+
+  it("splices a raw CRLF line replacement without expect", async () => {
+    const { content } = await editThenRead(
+      { "/crlf.txt": "one\r\ntwo\r\nthree\r\n" },
+      { path: "/crlf.txt", startLine: 2, endLine: 2, newString: "TWO\r" }
+    )
+    expect(content).toBe("one\r\nTWO\r\nthree\r\n")
+  })
+
   it("replaces a byte-exact block and returns the applied hunk", async () => {
     const { content, result } = await editThenRead(
       { "/a.py": "def add(a, b):\n    return a - b\n" },

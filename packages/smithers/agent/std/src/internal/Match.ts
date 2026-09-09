@@ -20,6 +20,8 @@
  * @since 0.1.0
  */
 
+import { sourceLines } from "./Text.ts"
+
 /**
  * One located block: the exact source span the needle matched.
  *
@@ -46,16 +48,6 @@ export interface Nearest {
   readonly startLine: number
   readonly endLine: number
   readonly text: string
-}
-
-/**
- * A file's lines for display. The empty string after a file's final newline is
- * an artifact of splitting, not a line anyone can quote, so a rendered region
- * never ends on it.
- */
-const lines = (text: string): ReadonlyArray<string> => {
-  const split = text.split("\n")
-  return split.length > 1 && split[split.length - 1] === "" ? split.slice(0, -1) : split
 }
 
 /**
@@ -115,10 +107,11 @@ const matchByLine = (
   normalize: (line: string) => string
 ): number => {
   const target = wanted.map(normalize)
+  const normalized = haystack.map(normalize)
   for (let index = 0; index + target.length <= haystack.length; index++) {
     let matched = true
     for (let step = 0; step < target.length; step++) {
-      if (normalize(haystack[index + step]!) !== target[step]) {
+      if (normalized[index + step] !== target[step]) {
         matched = false
         break
       }
@@ -140,8 +133,8 @@ const matchByLine = (
  * @since 0.1.0
  */
 export const nearest = (content: string, needle: string, pad = 3): Nearest | undefined => {
-  const haystack = lines(content)
-  const wanted = [...lines(needle)]
+  const haystack = sourceLines(content)
+  const wanted = [...sourceLines(needle)]
   while (wanted.length > 0 && wanted[wanted.length - 1] === "") wanted.pop()
   if (wanted.length === 0) return undefined
   let at = matchByLine(haystack, wanted, trimmedRight)
@@ -172,7 +165,7 @@ export const nearest = (content: string, needle: string, pad = 3): Nearest | und
 export const hunk = (content: string, start: number, end: number, pad = 2): Nearest => {
   const startLine = lineAt(content, start)
   const endLine = startLine + Math.max(0, content.slice(start, end).split("\n").length - 1)
-  const haystack = lines(content)
+  const haystack = sourceLines(content)
   const from = Math.max(0, startLine - 1 - pad)
   const to = Math.min(haystack.length, endLine + pad)
   return { startLine: from + 1, endLine: to, text: haystack.slice(from, to).join("\n") }

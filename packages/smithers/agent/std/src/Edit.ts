@@ -24,6 +24,7 @@ import * as Schema from "effect/Schema"
 import { capability, envelope } from "./internal/Declaration.ts"
 import * as Match from "./internal/Match.ts"
 import * as Preserve from "./internal/Preserve.ts"
+import { sourceLines } from "./internal/Text.ts"
 import * as StdError from "./StdError.ts"
 
 /**
@@ -138,8 +139,7 @@ const lineSpan = (
   startLine: number,
   endLine: number
 ): { readonly start: number; readonly end: number } | StdError.StdError => {
-  const lines = content.length === 0 ? [] : content.split("\n")
-  if (content.endsWith("\n")) lines.pop()
+  const lines = sourceLines(content)
   if (endLine < startLine) return invalid(path, `endLine ${endLine} is before startLine ${startLine}`)
   if (startLine > lines.length) {
     return new StdError.StdError({

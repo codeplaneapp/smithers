@@ -9,6 +9,7 @@ import {
   seekSequence,
   StreamingPatchParser
 } from "../src/internal/ApplyPatch.ts"
+import { sourceLines } from "../src/internal/Text.ts"
 import { layer } from "./TestLayers.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
@@ -324,6 +325,16 @@ describe("seekSequence", () => {
 })
 
 describe("deriveNewContents", () => {
+  it("splices CRLF source lines without changing their bytes", () => {
+    const oldLines = sourceLines("two\r\nthree\r\n")
+    expect(deriveNewContents("one\r\ntwo\r\nthree\r\nfour\r\n", "f.txt", [{
+      changeContext: undefined,
+      oldLines: [...oldLines],
+      newLines: oldLines.map((line) => line.replace("two", "TWO")),
+      isEndOfFile: false
+    }])).toBe("one\r\nTWO\r\nthree\r\nfour\r\n")
+  })
+
   it("applies a simple replacement", () => {
     expect(
       deriveNewContents("a\nold\nc\n", "f.txt", [

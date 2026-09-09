@@ -5,6 +5,13 @@ import { slice, sourceLines, truncateBytes } from "../src/internal/Text.ts"
 const bytes = (value: string): number => new TextEncoder().encode(value).byteLength
 
 describe("Text", () => {
+  it("retains carriage returns as source-line bytes", () => {
+    expect(sourceLines("one\r\ntwo\r\n")).toEqual(["one\r", "two\r"])
+    expect(sourceLines("one\r\ntwo\nthree\r")).toEqual(["one\r", "two", "three\r"])
+    expect(sourceLines("\r\n")).toEqual(["\r"])
+    expect(sourceLines("")).toEqual([])
+  })
+
   it("reports the bytes retained when a head cut crosses a multibyte scalar", () => {
     const source = "abc😀"
     const result = truncateBytes(source, 5, { keep: "head" })

@@ -53,6 +53,14 @@ describe("Read", () => {
     }
   })
 
+  it("preserves CRLF bytes in full and single-line pages", async () => {
+    const files = { "/a.txt": "one\r\ntwo\r\nthree\r\n" }
+    const read = await execute(Effect.provide(Read.run({ path: "/a.txt" }), layer({ files })))
+    const page = await execute(Effect.provide(Read.run({ path: "/a.txt", offset: 2, limit: 1 }), layer({ files })))
+    expect(read).toMatchObject({ content: "one\r\ntwo\r\nthree\r", startLine: 1, endLine: 3, totalLines: 3 })
+    expect(page).toMatchObject({ content: "two\r", startLine: 2, endLine: 2, totalLines: 3 })
+  })
+
   it("caps long displayed lines and discloses the cap", async () => {
     const result = await execute(Effect.provide(
       Read.run({ path: "/a.txt" }),
@@ -162,7 +170,7 @@ describe("Read", () => {
       Read.run({ path: "/a.txt" }),
       layer({ files: { "/a.txt": "" } })
     ))
-    expect(result).toMatchObject({ content: "", totalLines: 0, truncated: false })
+    expect(result).toMatchObject({ content: "", startLine: 1, endLine: 0, totalLines: 0, truncated: false })
 
     const exit = await execute(Effect.provide(
       Effect.exit(Read.run({ path: "/a.txt", offset: 2 })),

@@ -9,6 +9,7 @@
  *
  * @since 0.1.0
  */
+import { sourceLines } from "./Text.ts"
 
 const BEGIN_PATCH_MARKER = "*** Begin Patch"
 const END_PATCH_MARKER = "*** End Patch"
@@ -565,8 +566,7 @@ export const deriveNewContents = (
   path: string,
   chunks: ReadonlyArray<UpdateFileChunk>
 ): string => {
-  const originalLines = originalContents.split("\n")
-  if (originalLines[originalLines.length - 1] === "") originalLines.pop()
+  const originalLines = sourceLines(originalContents)
   const replacements = computeReplacements(originalLines, path, chunks)
   const newLines = applyReplacements([...originalLines], replacements)
   if (newLines[newLines.length - 1] !== "") newLines.push("")
