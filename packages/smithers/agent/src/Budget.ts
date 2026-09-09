@@ -1014,7 +1014,8 @@ export const make = (
      * Folds one call into a run's accumulator, at most once per step key.
      *
      * Answers whether this call was new, so a caller that also has to write the
-     * call down does so exactly when the accumulator took it.
+     * call down does so exactly when the accumulator took it. Recovery holds
+     * the recovery permit; live recording holds admission through its write.
      */
     const account = (
       run: RunAccount,
@@ -1023,37 +1024,35 @@ export const make = (
       spent: number,
       pending?: AccountingUnavailable
     ): Effect.Effect<boolean, AccountingUnavailable> =>
-      run.admission.withPermits(1)(
-        Ref.modify(run.state, (current): readonly [Result.Result<boolean, AccountingUnavailable>, State] => {
-          const previous = current.counted.get(stepKey)
-          if (previous !== undefined) {
-            const conflict = previous === spent
-              ? undefined
-              : unavailable("record", runId, "a model step was recorded with conflicting usage")
-            if (pending !== undefined && conflict !== undefined) run.pending.set(stepKey, conflict)
-            return [
-              conflict === undefined
-                ? Result.succeed(false)
-                : Result.fail(conflict),
-              current
-            ]
-          }
-          const counted = new Map(current.counted)
-          counted.set(stepKey, spent)
-          // Publish the actual cost and its pending durability in the same
-          // synchronous transition. A concurrent check cannot see only one.
-          if (pending !== undefined) run.pending.set(stepKey, pending)
+      Ref.modify(run.state, (current): readonly [Result.Result<boolean, AccountingUnavailable>, State] => {
+        const previous = current.counted.get(stepKey)
+        if (previous !== undefined) {
+          const conflict = previous === spent
+            ? undefined
+            : unavailable("record", runId, "a model step was recorded with conflicting usage")
+          if (pending !== undefined && conflict !== undefined) run.pending.set(stepKey, conflict)
           return [
-            Result.succeed(true),
-            {
-              ...current,
-              tokens: current.tokens + spent,
-              largestCall: Math.max(current.largestCall, spent),
-              counted
-            }
-          ] as const
-        }).pipe(Effect.flatMap(Effect.fromResult))
-      )
+            conflict === undefined
+              ? Result.succeed(false)
+              : Result.fail(conflict),
+            current
+          ]
+        }
+        const counted = new Map(current.counted)
+        counted.set(stepKey, spent)
+        // Publish the actual cost and its pending durability in the same
+        // synchronous transition. A concurrent check cannot see only one.
+        if (pending !== undefined) run.pending.set(stepKey, pending)
+        return [
+          Result.succeed(true),
+          {
+            ...current,
+            tokens: current.tokens + spent,
+            largestCall: Math.max(current.largestCall, spent),
+            counted
+          }
+        ] as const
+      }).pipe(Effect.flatMap(Effect.fromResult))
 
     /** Recovers one run's earlier spend, latency zero, and latch before its first decision. */
     const ensureRecovered = (run: RunAccount, runId: string): Effect.Effect<void, AccountingUnavailable> =>
@@ -1294,7 +1293,11 @@ export const make = (
               )
             )
             return yield* Effect.uninterruptibleMask((restore) =>
-              Effect.gen(function*() {
+              // A live write is backpressure, not evidence of a failed ledger.
+              // Keep new admission behind its result. A deferred transaction
+              // callback leaves pending set after this permit is released, so
+              // speculative, failed and interrupted writes still fail closed.
+              run.admission.withPermits(1)(Effect.gen(function*() {
                 const pending = run.pending.get(stepKey) ??
                   unavailable("record", runId, "a paid model step has uncommitted usage")
                 const counted = yield* account(run, runId, stepKey, spent, pending)
@@ -1306,7 +1309,7 @@ export const make = (
                     if (run.pending.get(stepKey) === pending) run.pending.delete(stepKey)
                   })
                 ))
-              })
+              }))
             )
           }), stepKey),
       usage: withRecovered((run) => Effect.map(Ref.get(run.state), summarize)),

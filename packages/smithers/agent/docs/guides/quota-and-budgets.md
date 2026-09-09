@@ -159,9 +159,11 @@ hosts. `check(stepKey)` is an advisory preview, not permission to dispatch
 concurrently. Custom model boundaries must use `reserve` inside a scope that
 lasts through the provider call and its `record`.
 
-Usage must be finite and non-negative. A failed or interrupted usage write
-remains pending. For a sealed result, retry that step with the same usage to
-finish the write. An unsealed invocation has no replayable model result;
+Usage must be finite and non-negative. New admission waits behind a usage
+write while that write is active, then uses the committed spend. This shares
+the existing per-run admission permit; unrelated runs remain independent.
+A failed or interrupted usage write remains pending. For a sealed result,
+retry that step with the same usage to finish the write. An unsealed invocation has no replayable model result;
 retrying the provider is not a repair for its failed usage write. New,
 uncounted steps fail closed while writes remain pending. A successful savepoint is
 not a durable commit; pending usage clears only after the outer transaction

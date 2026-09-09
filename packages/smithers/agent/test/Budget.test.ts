@@ -984,6 +984,67 @@ const budgetLedger = () => {
   return { journal, recorded }
 }
 
+describe("admission while usage is being committed", () => {
+  it.each(["available", "exhausted", "write-failed"] as const)(
+    "waits for a concurrent usage write before deciding: %s",
+    async (mode) => {
+      const { journal } = budgetLedger()
+      const writing = Latch.makeUnsafe(), release = Latch.makeUnsafe()
+      const delayed = Journal.make({
+        ...journal,
+        emitDurableUnfenced: (input) =>
+          input.eventType !== Budget.usageEvent
+            ? journal.emitDurableUnfenced(input)
+            : writing.open.pipe(
+              Effect.andThen(release.await),
+              Effect.andThen(
+                mode === "write-failed"
+                  ? Effect.fail(new Journal.JournalError({ code: "journal_closed", message: "usage write failed" }))
+                  : journal.emitDurableUnfenced(input)
+              )
+            )
+      })
+      await Effect.runPromise(
+        Effect.scoped(Effect.gen(function*() {
+          const budget = yield* Budget.make({ tokens: { max: mode === "exhausted" ? 100 : 1000 } })
+          const record = yield* Effect.forkChild(Effect.exit(budget.record("paid", { totalTokens: 60 })))
+          yield* writing.await
+          const next = yield* Effect.forkChild(Effect.exit(budget.reserve("next")))
+          yield* Effect.yieldNow
+          const waiting = next.pollUnsafe() === undefined
+          yield* release.open
+          expect(waiting).toBe(true)
+          const recorded = yield* Fiber.join(record)
+          const admitted = yield* Fiber.join(next)
+          if (mode === "write-failed") {
+            expect(failureOf(recorded)).toMatchObject({
+              _tag: "flows/agent/BudgetAccountingUnavailable",
+              phase: "record"
+            })
+            expect(failureOf(admitted)).toMatchObject({
+              _tag: "flows/agent/BudgetAccountingUnavailable",
+              phase: "record"
+            })
+            expect(failureOf(yield* Effect.exit(budget.check("later")))).toMatchObject({
+              _tag: "flows/agent/BudgetAccountingUnavailable"
+            })
+          } else {
+            expect(recorded._tag).toBe("Success")
+            expect(admitted).toMatchObject({
+              _tag: "Success",
+              value: { _tag: mode === "exhausted" ? "refuse" : "proceed" }
+            })
+            expect(yield* budget.usage).toEqual({ tokens: 60, calls: 1, largestCall: 60 })
+          }
+        })).pipe(
+          Effect.provideService(Journal.Journal, delayed),
+          Effect.provideService(FlowRuntime.FlowInstance, instanceFor("concurrent-usage"))
+        )
+      )
+    }
+  )
+})
+
 describe("recovering a run's skip-remaining latch", () => {
   it.each(["restart", "eviction"] as const)("keeps a reservation-only refusal after %s", async (recovery) => {
     const { journal, recorded } = budgetLedger()
