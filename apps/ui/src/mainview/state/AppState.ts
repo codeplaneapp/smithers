@@ -577,10 +577,10 @@ export const WIKI_DISPLAY_NAME = "Wiki"
 export const WIKI_GRAPH_ALL_SCOPE = "All"
 
 /*
- * Wave 10 (§2a/§2f) — pills are flow BINDINGS, never prompt strings: a
- * suggestion carries the flow it invokes directly, and the suggestion set
- * is DERIVED in App.tsx from live state (the genuinely-next step) — never
- * fabricated, never stored.
+ * A suggestion binds a pill directly to a flow and its optional arguments.
+ * The ordered set is persisted in the current RecommendationSchema row.
+ * controller/recommend.ts writes the rule's suggestions, then replaces them
+ * with a validated server answer when available; App.tsx projects that row.
  */
 export interface Suggestion {
   readonly id: string

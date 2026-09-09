@@ -310,6 +310,17 @@ preserved. There is no automatic restore, backend chooser, or streaming/native
 large-export path yet. Recovery also needs the app's recovery bundle and an
 answering storage worker; a never-answering worker remains a lifecycle limit.
 
+## Recommendations
+
+The `app-recommendations` collection persists one `current` row validated by
+`RecommendationSchema` in `src/mainview/state/AppState.ts`. It contains ordered
+flow bindings, their source (`rule` or `agent`), the session revision and a
+creation timestamp. `src/mainview/state/controller/recommend.ts` dispatches
+`recommendations.updated` with the rule's suggestions first, then a validated
+server answer when available. `App.tsx` projects the stored suggestions; before
+that row exists it uses the repository-step fallback. Reload retains the last
+recommendation while regeneration is pending.
+
 ## Retention
 
 Diagnostic compaction is part of the same dispatch as the append. The store

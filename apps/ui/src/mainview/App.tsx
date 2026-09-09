@@ -363,12 +363,6 @@ function App() {
   const authAction = authMessage?.action
 
   /*
-   * The suggestion row is DERIVED (§2a/§2f — never stored, never
-   * fabricated): the genuinely-next state-derived step when one exists
-   * (signed-out → Sign in; no repo open → Select a repo). An empty pill row
-   * is a correct state; a fabricated one is a violation.
-   */
-  /*
    * Selecting a repository is the one next step, and locally it is the native
    * folder picker (repo.open) — the IDE's open-folder — never a sign-in.
    */

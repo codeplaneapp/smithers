@@ -164,6 +164,85 @@ describe("recommend: the rule", () => {
     expect(suggestions[0]?.emphasis).toBe("primary")
   })
 
+  const lifecycleCatalog: ReadonlyArray<CatalogItem> = [
+    ...catalog,
+    { name: "approvals.list", summary: "List approvals" },
+    { name: "runs.list", summary: "List runs" }
+  ]
+
+  test("an active approval leads ahead of the repo step and takes precedence over a live run", () => {
+    const suggestions = ruleSuggestions({
+      state,
+      catalog: lifecycleCatalog,
+      repoStep: "local",
+      cards: [
+        { kind: "approval", title: "Approve deployment", status: "active" },
+        { kind: "run-trace", title: "Deploy", status: "active" }
+      ]
+    })
+    expect(suggestions.map((suggestion) => suggestion.flow)).toEqual(["approvals.list", "repo.open", "wiki"])
+    expect(suggestions[0]).toEqual({
+      id: "reco-approvals.list",
+      label: "Decide approvals",
+      flow: "approvals.list",
+      emphasis: "primary",
+      why: "A run is parked on your decision."
+    })
+  })
+
+  test("an active run without a pending approval leads ahead of the repo step", () => {
+    const suggestions = ruleSuggestions({
+      state,
+      catalog: lifecycleCatalog,
+      repoStep: "local",
+      cards: [
+        { kind: "approval", title: "Approved deployment", status: "acted" },
+        { kind: "run-trace", title: "Deploy", status: "active" }
+      ]
+    })
+    expect(suggestions.map((suggestion) => suggestion.flow)).toEqual(["runs.list", "repo.open", "wiki"])
+    expect(suggestions[0]).toEqual({
+      id: "reco-runs.list",
+      label: "See your runs",
+      flow: "runs.list",
+      emphasis: "primary",
+      why: "Runs are live on your workspace."
+    })
+  })
+
+  test("an acted approval contributes no lifecycle suggestion", () => {
+    const input = { state, catalog: lifecycleCatalog, repoStep: "none" as const }
+    expect(ruleSuggestions({
+      ...input,
+      cards: [{ kind: "approval", title: "Approved deployment", status: "acted" }]
+    })).toEqual(ruleSuggestions(input))
+  })
+
+  test("lifecycle suggestions require an offerable command", () => {
+    const input = {
+      state,
+      repoStep: "local" as const,
+      cards: [
+        { kind: "approval" as const, title: "Approve deployment", status: "active" as const },
+        { kind: "run-trace" as const, title: "Deploy", status: "active" as const }
+      ]
+    }
+    for (const unavailableCatalog of [
+      catalog,
+      lifecycleCatalog.map((command) => command.name === "approvals.list" || command.name === "runs.list"
+        ? { ...command, hidden: true }
+        : command)
+    ]) {
+      expect(ruleSuggestions({ ...input, catalog: unavailableCatalog })).toEqual(
+        ruleSuggestions({ state, repoStep: "local", catalog: unavailableCatalog })
+      )
+    }
+    expect(ruleSuggestions({
+      ...input,
+      catalog: lifecycleCatalog.filter((command) => command.name !== "approvals.list")
+    })[0]?.flow).toBe("runs.list")
+  })
+
   test("a streaming turn offers nothing: the pills are disabled anyway", () => {
     expect(ruleSuggestions({ state: { ...state, typing: true }, catalog, repoStep: "none" })).toEqual([])
   })
