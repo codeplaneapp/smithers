@@ -399,6 +399,7 @@ function addMonths(ms: number, months: number): number
 function daysInMonth(year: number, month: number): number
 function isSameDay(a: number, b: number): boolean
 function minutesIntoDay(ms: number): number
+function atMinutesIntoDay(dayMs: number, minutes: number): number
 function snapUp30(minutes: number): number
 function snapDown30(minutes: number): number
 function dayKey(ms: number): string
@@ -407,6 +408,7 @@ function weekLabel(days: number[]): string
 function weekdayLabel(ms: number): string
 function fullDayLabel(ms: number): string
 function timeLabel(ms: number): string
+function hourLabel(hour: number): string
 function hashSource(source: string | undefined): number
 
 const DAY_MS: 86400000
@@ -420,6 +422,13 @@ const calendarCss: string
 `CalendarEvent` values, with `CalendarView` naming the three. Every timestamp is
 Unix epoch milliseconds. `hashSource` is the per-source tint rotation, which is
 what gives an event without an explicit `color` a stable one.
+
+The week grid is a wall clock, not elapsed time. `atMinutesIntoDay` inverts
+`minutesIntoDay` to turn a row offset back into an instant, and `hourLabel`
+formats a gutter hour off a transition-free reference day. On a daylight-saving
+transition day a slot inside the spring-forward gap resolves to the instant the
+clock jumps to (02:30 becomes 03:30 local), and a slot inside the autumn
+fall-back hour resolves to its first, still-daylight occurrence.
 
 ## Vault
 

@@ -20,15 +20,15 @@ import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { RelativeTime } from "../time/RelativeTime";
 import { CALENDAR_CSS_ID, calendarCss } from "./calendarCss";
 import {
-  HOUR_MS,
-  MINUTE_MS,
   addDays,
   addMonths,
   agendaGroups,
+  atMinutesIntoDay,
   dayKey,
   eventsOnDay,
   fullDayLabel,
   hashSource,
+  hourLabel,
   isSameDay,
   minutesIntoDay,
   monthGridDays,
@@ -313,14 +313,14 @@ function MonthView({
 
 function WeekView({ anchorMs, events, nowMs, weekStartsOn, onEventClick, onSlotClick }: CalendarViewProps) {
   const days = useMemo(() => weekDays(anchorMs, weekStartsOn), [anchorMs, weekStartsOn]);
-  const weekStart = days[0] ?? startOfDay(anchorMs);
 
   function onColumnClick(dayMs: number, event: ReactMouseEvent<HTMLDivElement>) {
     if (event.target !== event.currentTarget) return;
     if (!onSlotClick) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const minutes = snapDown30(((event.clientY - rect.top) / HOUR_PX) * 60);
-    onSlotClick(dayMs + Math.min(Math.max(minutes, 0), 24 * 60 - 30) * MINUTE_MS);
+    // The rows are wall-clock hours, so the offset is a wall clock, not elapsed time.
+    onSlotClick(atMinutesIntoDay(dayMs, Math.min(Math.max(minutes, 0), 24 * 60 - 30)));
   }
 
   return (
@@ -359,7 +359,7 @@ function WeekView({ anchorMs, events, nowMs, weekStartsOn, onEventClick, onSlotC
             <div className="sui-cal-week-gutter" aria-hidden>
               {Array.from({ length: 24 }, (_, hour) => (
                 <span key={hour} className="sui-cal-week-hour" style={{ top: hour * HOUR_PX }}>
-                  {hour === 0 ? "" : timeLabel(weekStart + hour * HOUR_MS)}
+                  {hour === 0 ? "" : hourLabel(hour)}
                 </span>
               ))}
             </div>
@@ -493,7 +493,13 @@ export type CalendarProps = ComponentProps<"div"> & {
   defaultDate?: number;
   onDateChange?: (date: number) => void;
   onEventClick?: (event: CalendarEvent) => void;
-  /** Fired with the day-start (month) or 30-minute-snapped local time (week) of an empty-slot click. */
+  /**
+   * Fired with the day-start (month) or 30-minute-snapped local time (week) of
+   * an empty-slot click. The week time is the row's wall clock: on a
+   * daylight-saving transition day a slot inside the spring-forward gap resolves
+   * to the instant the clock jumps to, and a slot inside the autumn fall-back
+   * hour resolves to its first occurrence.
+   */
   onSlotClick?: (date: number) => void;
   /** getDay()-style index of the first column (0 = Sunday, default). */
   weekStartsOn?: number;

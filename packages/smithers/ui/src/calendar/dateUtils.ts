@@ -139,10 +139,42 @@ export function timeLabel(ms: number): string {
   return new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+/**
+ * January 1 is the reference day for wall-clock hour labels: no zone shifts its
+ * clock on it, so hour N formats as hour N.
+ */
+const HOUR_LABEL_REFERENCE_YEAR = 2001;
+
+/**
+ * "9:00 AM"-style label for the wall-clock hour `hour` (0-23). The week grid
+ * draws one row per wall-clock hour, so the label is read off a transition-free
+ * reference day; formatting `dayStart + hour * HOUR_MS` on the visible day skips
+ * the spring-forward hour and prints the autumn one twice.
+ */
+export function hourLabel(hour: number): string {
+  return timeLabel(new Date(HOUR_LABEL_REFERENCE_YEAR, 0, 1, hour).getTime());
+}
+
 /** Minutes elapsed since local midnight. */
 export function minutesIntoDay(ms: number): number {
   const d = new Date(ms);
   return d.getHours() * 60 + d.getMinutes();
+}
+
+/**
+ * The inverse of {@link minutesIntoDay}: the instant whose wall clock reads
+ * `minutes` past midnight on the local day containing `dayMs`. Adding
+ * `minutes * MINUTE_MS` to a day start instead measures elapsed time, which
+ * slips by an hour on a daylight-saving transition day.
+ *
+ * The daylight-saving edges resolve the way `Date` does. A slot that does not
+ * exist, inside the spring-forward gap, lands on the instant the clock jumps to
+ * (02:30 returns 03:30 local). A slot that happens twice, inside the autumn
+ * fall-back hour, returns its first, still-daylight occurrence.
+ */
+export function atMinutesIntoDay(dayMs: number, minutes: number): number {
+  const d = new Date(dayMs);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, minutes).getTime();
 }
 
 /** Snap minutes down to the nearest 30-minute slot (week-grid rendering). */
