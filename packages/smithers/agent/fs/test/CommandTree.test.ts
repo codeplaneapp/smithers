@@ -1,6 +1,7 @@
 import { Cause, Effect, Option } from "effect"
 import { describe, expect, it } from "vitest"
 import * as CommandTree from "../src/CommandTree.ts"
+import * as CommandLine from "../src/internal/CommandLine.ts"
 import * as Route from "../src/Route.ts"
 import { makeRoute } from "./helpers.ts"
 
@@ -12,6 +13,38 @@ const failure = async (effect: Effect.Effect<unknown, unknown>): Promise<any> =>
 }
 
 describe("CommandTree", () => {
+  it.each([0, 4_097, 16_384])("preserves %i-character unconsumed arguments", async (length) => {
+    const tree = await Effect.runPromise(CommandTree.make([makeRoute("review"), makeRoute("review/nested")]))
+    const value = "a".repeat(length)
+    for (const tail of [[value], ["--tags", value]]) {
+      const resolved = await Effect.runPromise(CommandTree.resolve(tree, ["review", ...tail]))
+      expect(resolved.route.name).toBe("review")
+      expect(resolved.rest).toEqual(tail)
+      expect(Object.isFrozen(resolved.rest)).toBe(true)
+    }
+  })
+
+  it("rejects oversized argv tokens and invalid route prefixes", async () => {
+    const tree = await Effect.runPromise(CommandTree.make([makeRoute("review/nested")]))
+    expect(
+      await failure(CommandTree.resolve(tree, [
+        "review",
+        "nested",
+        "--tags",
+        "a".repeat(CommandLine.maximumTokenLength + 1)
+      ]))
+    ).toMatchObject({ code: "resource_limit", method: "CommandTree.resolve" })
+    for (const segment of ["", "a".repeat(Route.maximumRouteNameLength + 1)]) {
+      for (const prefix of [[], ["review"]]) {
+        expect(await failure(CommandTree.resolve(tree, [...prefix, segment]))).toMatchObject({
+          code: "resource_limit",
+          method: "CommandTree.resolve",
+          description: "The command name exceeds its resource bounds"
+        })
+      }
+    }
+  })
+
   it("supports prefix routes, exact resolution, and stable traversal", async () => {
     const tree = await Effect.runPromise(CommandTree.make([
       makeRoute("z"),

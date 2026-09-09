@@ -1,9 +1,48 @@
 import { Cause, Effect, Option, Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Command from "../src/Command.ts"
 import * as CommandLine from "../src/internal/CommandLine.ts"
 import * as SchemaBridge from "../src/internal/SchemaBridge.ts"
+import * as Route from "../src/Route.ts"
+import { makeRoute } from "./helpers.ts"
 
 describe("Command", () => {
+  it.each([0, 4_097, 16_384])("parses a %i-character flag value through the public surface", async (length) => {
+    const surface = await Effect.runPromise(Command.make([makeRoute("review")]))
+    const value = "a".repeat(length)
+    const parsed = await Effect.runPromise(surface.parse(`review --tags "${value}" --tags a --number 1`))
+    expect(parsed.input).toEqual({ tags: [value, "a"], number: 1 })
+    expect(parsed.argv).toEqual(["review", "--tags", value, "--tags", "a", "--number", "1"])
+  })
+
+  it("preserves command-token and route-name errors through the public surface", async () => {
+    const surface = await Effect.runPromise(Command.make([makeRoute("review")]))
+    for (
+      const [command, method, description] of [
+        [
+          `review --tags ${"a".repeat(CommandLine.maximumTokenLength + 1)} --tags a --number 1`,
+          "CommandLine.lex",
+          `A command token may contain at most ${CommandLine.maximumTokenLength} characters`
+        ],
+        [
+          "a".repeat(Route.maximumRouteNameLength + 1),
+          "CommandTree.resolve",
+          "The command name exceeds its resource bounds"
+        ]
+      ] as const
+    ) {
+      const exit = await Effect.runPromise(Effect.exit(surface.parse(command)))
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        expect(Option.getOrThrow(Cause.findErrorOption(exit.cause))).toMatchObject({
+          code: "resource_limit",
+          method,
+          description
+        })
+      }
+    }
+  })
+
   it("lexes quotes and escapes before parsing flags", async () => {
     const argv = await Effect.runPromise(
       CommandLine.lex(

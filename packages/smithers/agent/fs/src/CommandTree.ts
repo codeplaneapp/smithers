@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { FsError } from "./FsError.ts"
 import * as Boundary from "./internal/Boundary.ts"
+import * as CommandLine from "./internal/CommandLine.ts"
 import * as ReadonlyMap from "./internal/ReadonlyMap.ts"
 import * as Route from "./Route.ts"
 
@@ -188,12 +189,12 @@ export const make = (input: ReadonlyArray<Route.Route>): Effect.Effect<CommandTr
 const resolutionTokens = (input: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string>, FsError> => {
   const captured = Boundary.stringArray(input, {
     maxItems: maximumResolutionTokens,
-    maxLength: Route.maximumRouteNameLength,
-    allowEmpty: false
+    maxLength: CommandLine.maximumTokenLength,
+    allowEmpty: true
   })
   return captured.ok
     ? Effect.succeed(captured.value)
-    : Effect.fail(resourceLimit("CommandTree.resolve", "The command name exceeds its resource bounds"))
+    : Effect.fail(resourceLimit("CommandTree.resolve", "The command arguments exceed their resource bounds"))
 }
 
 /**
@@ -208,11 +209,18 @@ export const resolve = (tree: CommandTree, input: ReadonlyArray<string>): Effect
     let node = tree
     let matched: { readonly route: Route.Route; readonly consumed: number } | undefined
     for (let index = 0; index < argv.length; index++) {
+      const segment = argv[index]!
+      if (segment.length === 0 || segment.length > Route.maximumRouteNameLength) {
+        // Once a route matches, a token that cannot be a route segment belongs
+        // to its argument tail and retains the command-token bounds.
+        if (matched !== undefined) break
+        return yield* Effect.fail(resourceLimit("CommandTree.resolve", "The command name exceeds its resource bounds"))
+      }
       // Route identity is canonicalized to NFC in `Route.snapshot`, so a name
       // typed or transmitted in decomposed form still selects the same route.
       // Only the lookup key is normalized: unconsumed argument text is left
       // exactly as the caller supplied it.
-      const child = node.children.get(argv[index]!.normalize("NFC"))
+      const child = node.children.get(segment.normalize("NFC"))
       if (child === undefined) break
       node = child
       if (Option.isSome(child.route)) matched = { route: child.route.value, consumed: index + 1 }

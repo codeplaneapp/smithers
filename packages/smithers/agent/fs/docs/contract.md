@@ -127,6 +127,11 @@ Single quotes are literal: a backslash inside them is an ordinary character, so
 a Windows path or a regular expression survives unchanged. Unquoted and
 double-quoted text honor backslash escapes. Shell syntax is never evaluated.
 
+Quoted empty argument values are preserved. Route resolution snapshots the
+full argv under command-token bounds. Route-name restrictions apply while
+selecting a route prefix; unconsumed arguments retain their original text
+and may contain up to 16384 UTF-16 code units each.
+
 ## Snapshot semantics
 
 Routes, trie nodes, maps, scan results, warnings, command inputs, decoded
