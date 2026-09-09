@@ -1,12 +1,12 @@
 ---
 title: "Testing"
-description: "What @smthrs/kernel ships for tests: the three grant-store doubles, the deterministic host bundle, the shared host contract suite, and what the package's own suite already covers."
+description: "Test guarded hosts with the kernel grant-store doubles, the shared host contract suite, and the deterministic host from @smthrs/testing."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/kernel/docs/testing.md"
 ---
 
-The kernel ships three public test subpaths. They are published code, not
-dev-only files, so a consumer testing against a guarded host uses the same
-doubles the package tests itself with.
+The kernel ships two public test helpers: `test/TestGrantStore` and
+`test/contract` (also exported as `test/HostContract`). They are published code,
+so consumers can use the same doubles and host contract as the package tests.
 
 ## Pick a grant-store double
 
@@ -33,9 +33,8 @@ evaluation path, and it needs a `Workspace`.
 
 ## Run against the deterministic host
 
-Install the optional `@smthrs/platform-browser@1.0.0-rc.0` peer before using
-`TestHost`. It supplies this test helper's browser host services and is not
-installed by normal kernel consumers.
+Add `"@smthrs/testing": "workspace:*"` to the consuming package's
+devDependencies in the checkout. See [Installation](/installation/).
 
 `@smthrs/testing/TestHost` is the whole host surface with every source of
 nondeterminism pinned: a `Map`-backed filesystem, a scripted interpreter,

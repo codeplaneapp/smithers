@@ -26127,11 +26127,7 @@ https://smithers.sh/docs/reference/api/kernel/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/kernel/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/docs/api.md) · [package docs](https://kernel.smithers.sh)
 
-> **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/jj`](/docs/reference/api/jj/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/platform-browser`](/docs/reference/api/platform-browser/)
-
-`@smthrs/kernel/test/TestHost` requires the optional peer
-`@smthrs/platform-browser@1.0.0-rc.0`. Install that package when using this
-test helper. Normal kernel imports do not install browser test support.
+> **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/jj`](/docs/reference/api/jj/) · [`@smthrs/journal`](/docs/reference/api/journal/)
 
 The root entry point re-exports every module as a namespace, and each module is
 also importable from `@smthrs/kernel/<Module>`:
@@ -26155,7 +26151,6 @@ Schema ids (`@smthrs/kernel/GrantEvent/RunGrant` and its siblings), journal even
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | `@smthrs/kernel`                     | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/src/index.ts)                             | any      |
 | `@smthrs/kernel/test/TestGrantStore` | [src/test/TestGrantStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/src/test/TestGrantStore.ts) | any      |
-| `@smthrs/kernel/test/TestHost`       | [src/test/TestHost.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/src/test/TestHost.ts)             | Node.js  |
 | `@smthrs/kernel/test/contract`       | [src/test/HostContract.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/src/test/HostContract.ts)     | Node.js  |
 
 ## Capability and Permission
@@ -26345,7 +26340,10 @@ A bulk approval. `scope` defaults to `"run"`.
 interface MakeOptions {
   readonly attended?: boolean | undefined
   readonly rules?: ReadonlyArray<Rule> | ReadonlyArray<ReadonlyArray<Rule>> | undefined
-  readonly runRules?: ReadonlyArray<Rule> | undefined
+  readonly runRules?: ReadonlyArray<Rule | {
+    readonly rule: Rule
+    readonly ceiling: ReadonlyArray<ReadonlyArray<CapabilityPattern>>
+  }> | undefined
   readonly envelope?: EnvelopeGrantOptions | undefined
   readonly envelopeSignatures?: ReadonlyArray<string> | undefined
   readonly runId?: string | undefined
@@ -26494,26 +26492,33 @@ Durable audit evidence, deliberately never replayed as active authority.
 
 ```ts
 class RunGrant extends Schema.TaggedClass<RunGrant>()("@smthrs/kernel/GrantEvent/RunGrant", {
-  eventType: Schema.Literal("flows.kernel.grant.run.v1")
+  eventType: Schema.Literal("flows.kernel.grant.run.v2")
   requestId: Schema.String
   runId: Schema.String
   planDigest: Schema.String
   capability: Capability
   pattern: CapabilityPattern
+  ceiling: Schema.Array(Schema.Array(CapabilityPattern))
   scope: Schema.Literal("run")
   tier: GrantTier
 }) {}
 ```
 
 Replayed as active authority only for its own run and the current plan digest.
-`planDigest` is required here and optional on every other member.
+`ceiling` stores the requesting fiber's normalized conjunction of any-of pattern
+groups. An empty outer array is unrestricted; an empty inner group denies all.
+Replay intersects this ceiling with the constructor's ceiling. Trusted legacy
+`flows.kernel.grant.run.v1` entries fail construction with `invalid_resolution`
+because their captured ceiling cannot be recovered.
+
+Both `RunGrant` and `EnvelopeGrant` require `planDigest`; other members make it optional.
 
 ### GrantEvent.RememberedGrant
 
 ```ts
 class RememberedGrant extends Schema.TaggedClass<RememberedGrant>()(
   "@smthrs/kernel/GrantEvent/RememberedGrant",
-  { eventType: Schema.Literal("flows.kernel.grant.remembered.v1") /* as RunGrant, planDigest optional */ }
+  { eventType: Schema.Literal("flows.kernel.grant.remembered.v1") /* as OnceGrant, scope "remembered" */ }
 ) {}
 ```
 
@@ -27143,12 +27148,17 @@ const toHttpClientError: (options: {
   readonly error: PermissionError
 }) => HttpClientError
 
-const fromHttpClientError: (error: HttpClientError) => Option.Option<PermissionError>
+const fromHttpClientError: (error: HttpClientError) => Option.Option<PermissionErrorPayload>
 ```
 
 The projection and its inverse. The reason is always a `TransportError`,
 because the request did not leave the host; `description` carries
-`Permission.formatError` and `cause` carries the structured failure.
+`Permission.formatError` and `cause` carries the structured failure. Recovery
+returns the original cause as data-only `PermissionErrorPayload` when a
+`TransportError` cause passes `Permission.isPermissionError`. This validates
+structure, not origin; establish producer or request identity separately across
+a trust boundary. Import `decodePermissionError` from `@smthrs/capability`
+for a yieldable instance.
 
 ### HttpClient.makeNoop and layerNoop
 
@@ -27249,6 +27259,10 @@ Effect's platform surface.
 
 ## Test subpaths
 
+For a deterministic host, use `@smthrs/testing/TestHost`. Add
+`"@smthrs/testing": "workspace:*"` to the consuming package's devDependencies;
+see [Testing](https://kernel.smithers.sh/testing/).
+
 ### @smthrs/kernel/test/TestGrantStore
 
 ```ts
@@ -27262,37 +27276,6 @@ one reply per check: `once`, `run`, and `remembered` allow it, `deny` rejects
 it, and exhausting the script rejects with
 `"permission reply script exhausted"`. None of the three requires a
 `Workspace`.
-
-### @smthrs/kernel/test/TestHost
-
-```ts
-const makeMemoryFs: (files?: Readonly<Record<string, string>>) => /* ZenFS-shaped volume */
-const makeStubBash: (commands?: Readonly<Record<string, CommandResult>>) => /* scripted interpreter */
-const layerSeededRandom: (seed?: number) => Layer.Layer<never>
-
-type TestHost = FileSystem.FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpClient
-
-const layer: (options?: {
-  readonly files?: Readonly<Record<string, string>>
-  readonly commands?: Readonly<Record<string, {
-    stdout?: string
-    stderr?: string
-    exitCode?: number
-    delayMs?: number
-    pending?: boolean
-  }>>
-  readonly seed?: number
-}) => Layer.Layer<TestHost>
-
-const TestHost: Layer.Layer<TestHost>
-```
-
-The deterministic host bundle. `TestHost` is the zero-config form: empty
-filesystem, no scripted commands, seed 42. The filesystem is the same
-`BrowserFileSystem` adapter the browser runs, over a `Map`-backed volume, and
-the spawner is provided over the filesystem and path layers so the interpreter
-and the `FileSystem` service agree about what exists. Node-only, because
-`TestClock` reaches for `node:assert`.
 
 ### @smthrs/kernel/test/contract
 

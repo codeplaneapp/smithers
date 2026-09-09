@@ -201,14 +201,10 @@
   "peerDependencies": {
     "@effect/vitest": "4.0.0-rc.112",
     "effect": "4.0.0-rc.112",
-    "vitest": "4.1.9",
-    "@smthrs/platform-browser": "1.0.0-rc.0"
+    "vitest": "4.1.9"
   },
   "peerDependenciesMeta": {
     "@effect/vitest": {
-      "optional": true
-    },
-    "@smthrs/platform-browser": {
       "optional": true
     },
     "vitest": {
@@ -232,7 +228,6 @@
     "madge": "8.0.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.69.0",
-    "vitest": "4.1.9",
-    "@smthrs/platform-browser": "1.0.0-rc.0"
+    "vitest": "4.1.9"
   }
 }

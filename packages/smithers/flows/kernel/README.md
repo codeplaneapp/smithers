@@ -1,9 +1,5 @@
 # @smthrs/kernel
 
-`@smthrs/kernel/test/TestHost` requires the optional peer
-`@smthrs/platform-browser@1.0.0-rc.0`. Install that package when using this
-test helper. Normal kernel imports do not install browser test support.
-
 This package declares `effect` as an exact
 `4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
@@ -29,7 +25,7 @@ without ever mentioning permission.
 `@smthrs/kernel` is not on npm at 1.0.0-rc.0. Its source lives in the
 [smithers repository](https://github.com/smithersai/smithers), and the
 [installation page](https://kernel.smithers.sh/installation/) covers how to
-depend on it from a checkout, the import forms, and the three test subpaths.
+depend on it from a checkout, the import forms, and the two test helpers.
 
 It needs Node.js 22.19.0 or later and `effect` 4.0.0-rc.112. It carries no
 platform implementations of its own, so a composition that reaches a real
@@ -39,7 +35,8 @@ machine also adds a bundle such as
 ## Refuse an operation nobody authorized
 
 This program composes the kernel over the deterministic host from
-`@smthrs/testing`. The policy allows reads
+`@smthrs/testing/TestHost`. Add `"@smthrs/testing": "workspace:*"` to the
+consuming package's devDependencies before running it. The policy allows reads
 under the workspace and says nothing about writes:
 
 ```ts
@@ -128,10 +125,11 @@ on the [API reference](https://kernel.smithers.sh/reference/api/).
 `Capability` and `Permission` are re-exports; their modules live in
 [`@smthrs/capability`](https://capability.smithers.sh).
 
-Two test subpaths ship in the package's export map, not as dev-only files:
+Two test helpers ship in the package's export map, not as dev-only files:
 `@smthrs/kernel/test/TestGrantStore` for allow, deny, and scripted grant-store
 doubles and `@smthrs/kernel/test/contract` for `runHostContract`, the behavioral
-contract every host bundle must satisfy. The contract is Node-only. The
+contract every host bundle must satisfy (`test/HostContract` is an alias).
+The contract is Node-only. The
 deterministic host bundle lives at `@smthrs/testing/TestHost` so the kernel does
 not depend back on a platform implementation.
 

@@ -4483,9 +4483,6 @@ importers:
       '@eslint/js':
         specifier: 9.39.5
         version: 9.39.5
-      '@smthrs/platform-browser':
-        specifier: 1.0.0-rc.0
-        version: link:../platform-browser
       '@types/node':
         specifier: 26.4.1
         version: 26.4.1

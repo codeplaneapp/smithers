@@ -66,7 +66,8 @@ and `@smthrs/kernel/*/index`. `@smthrs/kernel/package.json` is exported.
 
 ## Test subpaths
 
-Two subpaths ship for testing. They are published code, not dev-only files:
+Two helpers ship for testing. They are published code, not dev-only files;
+`test/HostContract` is an alias for `test/contract`:
 
 | Subpath                              | What it gives you                                                                 | Platform |
 | ------------------------------------ | --------------------------------------------------------------------------------- | -------- |
@@ -76,7 +77,16 @@ Two subpaths ship for testing. They are published code, not dev-only files:
 `test/contract` is Node-only because it uses Node process and
 temporary-directory fixtures. The deterministic host bundle is published by
 `@smthrs/testing/TestHost`; keeping it with the other test utilities avoids a
-kernel-to-platform dependency cycle.
+kernel-to-platform dependency cycle. To use that host, add a devDependency
+in the consuming workspace package:
+
+```json
+{
+  "devDependencies": {
+    "@smthrs/testing": "workspace:*"
+  }
+}
+```
 
 `test/contract` registers Vitest cases, so importing it requires the declared
 peers, `@effect/vitest@4.0.0-rc.112` and `vitest@4.1.9`. Both are optional: a

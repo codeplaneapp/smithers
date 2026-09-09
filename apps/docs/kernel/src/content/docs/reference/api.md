@@ -4,10 +4,6 @@ description: "Every public export of @smthrs/kernel: the closed host service lis
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/kernel/docs/api.md"
 ---
 
-`@smthrs/kernel/test/TestHost` requires the optional peer
-`@smthrs/platform-browser@1.0.0-rc.0`. Install that package when using this
-test helper. Normal kernel imports do not install browser test support.
-
 The root entry point re-exports every module as a namespace, and each module is
 also importable from `@smthrs/kernel/<Module>`:
 
@@ -30,7 +26,6 @@ Schema ids (`@smthrs/kernel/GrantEvent/RunGrant` and its siblings), journal even
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | `@smthrs/kernel`                     | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/src/index.ts)                             | any      |
 | `@smthrs/kernel/test/TestGrantStore` | [src/test/TestGrantStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/src/test/TestGrantStore.ts) | any      |
-| `@smthrs/kernel/test/TestHost`       | [src/test/TestHost.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/src/test/TestHost.ts)             | Node.js  |
 | `@smthrs/kernel/test/contract`       | [src/test/HostContract.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/src/test/HostContract.ts)     | Node.js  |
 
 ## Capability and Permission
@@ -1139,6 +1134,10 @@ Effect's platform surface.
 
 ## Test subpaths
 
+For a deterministic host, use `@smthrs/testing/TestHost`. Add
+`"@smthrs/testing": "workspace:*"` to the consuming package's devDependencies;
+see [Testing](/testing/).
+
 ### @smthrs/kernel/test/TestGrantStore
 
 ```ts
@@ -1152,37 +1151,6 @@ one reply per check: `once`, `run`, and `remembered` allow it, `deny` rejects
 it, and exhausting the script rejects with
 `"permission reply script exhausted"`. None of the three requires a
 `Workspace`.
-
-### @smthrs/kernel/test/TestHost
-
-```ts
-const makeMemoryFs: (files?: Readonly<Record<string, string>>) => /* ZenFS-shaped volume */
-const makeStubBash: (commands?: Readonly<Record<string, CommandResult>>) => /* scripted interpreter */
-const layerSeededRandom: (seed?: number) => Layer.Layer<never>
-
-type TestHost = FileSystem.FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpClient
-
-const layer: (options?: {
-  readonly files?: Readonly<Record<string, string>>
-  readonly commands?: Readonly<Record<string, {
-    stdout?: string
-    stderr?: string
-    exitCode?: number
-    delayMs?: number
-    pending?: boolean
-  }>>
-  readonly seed?: number
-}) => Layer.Layer<TestHost>
-
-const TestHost: Layer.Layer<TestHost>
-```
-
-The deterministic host bundle. `TestHost` is the zero-config form: empty
-filesystem, no scripted commands, seed 42. The filesystem is the same
-`BrowserFileSystem` adapter the browser runs, over a `Map`-backed volume, and
-the spawner is provided over the filesystem and path layers so the interpreter
-and the `FileSystem` service agree about what exists. Node-only, because
-`TestClock` reaches for `node:assert`.
 
 ### @smthrs/kernel/test/contract
 

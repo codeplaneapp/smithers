@@ -55,9 +55,10 @@ adds a bundle such as [`@smthrs/platform-node`](https://platform-node.smithers.s
 
 ## Refuse an operation nobody authorized
 
-This program composes the kernel over the deterministic host that ships with
-the package, so it runs with nothing else installed. The policy allows reads
-under the workspace and says nothing about writes:
+This program composes the kernel over `@smthrs/testing/TestHost`. Add
+`"@smthrs/testing": "workspace:*"` to the consuming package's devDependencies
+before running it. The policy allows reads under the workspace and says
+nothing about writes:
 
 ```ts
 import { Capability, GrantStore, HostServices, Permission, Workspace } from "@smthrs/kernel"
