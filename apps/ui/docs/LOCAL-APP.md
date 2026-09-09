@@ -129,8 +129,28 @@ session acquisitions before resolving, including waits for Node discovery or
 server retirement. Requests during close are refused; a later request may
 start a fresh session after the repository is reopened. Host shutdown cancels
 all pending acquisitions and permanently refuses new ones. Cancelled
-acquisitions return `503 language_server_failed`. Requests are bounded: 64 KiB
-bodies, 8 in flight per server, 5 s each. What the server writes in free text
+acquisitions return `503 language_server_failed`. Request bodies are capped at
+64 KiB, with 8 RPCs in flight per server. Deadline budgets are separate:
+
+- Initialization allows 15 s (`LSP_STARTUP_TIMEOUT_MS` in
+  [`LspSession.ts`](../src/bun/lsp/LspSession.ts)).
+- After initialization, the first hover or definition starts a shared 15 s
+  project-load deadline (`LSP_STARTUP_TIMEOUT_MS`). Concurrent cold queries
+  use its remaining time; they do not extend it. A successful positioned
+  response ends the cold window. Queries sent after success or deadline
+  expiry use the steady-state budget.
+- Steady-state RPCs allow 5 s (`LSP_REQUEST_TIMEOUT_MS` in
+  [`LocalApp.ts`](../../../packages/rpc/src/LocalApp.ts)).
+- Diagnostics wait up to 5 s for a publication (`LSP_REQUEST_TIMEOUT_MS`,
+  passed by [`routes/lsp.ts`](../src/bun/routes/lsp.ts)), after initialization
+  and document sync. A cached current publication returns immediately.
+
+These are stage budgets, not a five-second end-to-end request limit. The
+[`LspSession.startup.test.ts`](../src/bun/lsp/LspSession.startup.test.ts)
+example exercises bounded initialization, concurrent cold queries and the
+return to steady-state deadlines.
+
+What the server writes in free text
 (hover markdown, diagnostic messages, its last stderr line) has the host's
 absolute paths made repository-relative, or cut to their last segment
 outside the repository, before it reaches the renderer, the model or `/ws`;

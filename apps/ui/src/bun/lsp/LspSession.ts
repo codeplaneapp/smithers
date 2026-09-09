@@ -333,7 +333,7 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
    */
   let projectLoaded = false
   let projectLoadDeadline: number | undefined
-  const positioned = async <T>(path: string, position: WirePosition, method: string): Promise<{ readonly answer: T; readonly document: OpenDocument }> => {
+  const positioned = async <T>(path: string, position: WirePosition, method: string): Promise<{ readonly answer: T; readonly document: Readonly<Pick<OpenDocument, "digest" | "version">> }> => {
     touch()
     inFlight += 1
     try {
@@ -344,12 +344,15 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
       if (!projectLoaded) projectLoadDeadline ??= Date.now() + startupTimeoutMs
       const coldRemaining = (projectLoadDeadline ?? 0) - Date.now()
       const timeout = !projectLoaded && coldRemaining > 0 ? coldRemaining : requestTimeoutMs
+      // Another query can sync an edit while this RPC is pending. Stamp the
+      // answer with the document revision sent with this query.
+      const snapshot = { digest: document.digest, version: document.version }
       const answer = await rpc.request<T>(method, {
         textDocument: { uri: document.uri },
         position: { line: position.line - 1, character: position.character - 1 }
       }, timeout)
       projectLoaded = true
-      return { answer, document }
+      return { answer, document: snapshot }
     } catch (error) {
       throw refused(error)
     } finally {
