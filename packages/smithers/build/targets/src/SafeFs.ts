@@ -433,9 +433,9 @@ export const resolveDirectory = async (
  * was being read.
  *
  * `expected` is the identity a previous observation recorded for the
- * directory. It is re-checked before the listing, so a directory swapped for
- * another between the decision to walk it and the walk itself fails rather
- * than contributing another tree's entries under this one's name.
+ * directory. It is re-checked before and after the listing, so a directory
+ * swapped for another between the decision to walk it and the walk itself
+ * fails rather than contributing another tree's entries under this one's name.
  *
  * @category discovery
  * @since 0.1.0
@@ -462,6 +462,11 @@ export const listDirectory = async (
   }
   checkCancelled(options)
   const entries = await io.readdir(path, limit)
+  checkCancelled(options)
+  const after = await resolveDirectory(path, options)
+  if (after === undefined || identity(after.stats) !== identity(expected.stats)) {
+    throw new Error(`${what} was replaced while it was being read: ${path}`)
+  }
   checkCancelled(options)
   if (entries.length > limit) {
     throw new Error(`${what} contains more than ${limit} entries: ${path}`)

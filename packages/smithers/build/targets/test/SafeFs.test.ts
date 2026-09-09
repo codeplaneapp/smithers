@@ -477,6 +477,76 @@ describe("SafeFs.resolveDirectory", () => {
   })
 
   /** The swap seam again, one level up: a directory replaced mid-listing. */
+  it("refuses an outside symlink swapped in immediately before enumeration", async () => {
+    await write("src/a.ts", "inside\n")
+    await Fs.writeFile(NodePath.join(outside, "outside-private-filename"), "outside\n")
+    const target = at("src")
+    const options = { root: await canonical(), what: "directory" }
+    const entry = await SafeFs.resolveDirectory(target, options)
+    const io: SafeFs.Io = {
+      ...SafeFs.defaultIo,
+      readdir: async (path, limit) => {
+        await Fs.rename(target, at("parked"))
+        await Fs.symlink(outside, target)
+        const entries = await SafeFs.defaultIo.readdir(path, limit)
+        expect(entries.map((entry) => entry.name)).toEqual(["outside-private-filename"])
+        return entries
+      }
+    }
+
+    await expect(SafeFs.listDirectory(target, entry!, { ...options, io }))
+      .rejects.toThrow(/was replaced while it was being read/)
+  })
+
+  it("refuses another directory swapped in immediately before enumeration", async () => {
+    await write("src/a.ts", "inside\n")
+    await write("other/b.ts", "replacement\n")
+    const target = at("src")
+    const options = { root: await canonical(), what: "directory" }
+    const entry = await SafeFs.resolveDirectory(target, options)
+    const io: SafeFs.Io = {
+      ...SafeFs.defaultIo,
+      readdir: async (path, limit) => {
+        await Fs.rename(target, at("parked"))
+        await Fs.rename(at("other"), target)
+        return SafeFs.defaultIo.readdir(path, limit)
+      }
+    }
+
+    await expect(SafeFs.listDirectory(target, entry!, { ...options, io }))
+      .rejects.toThrow(/was replaced while it was being read/)
+  })
+
+  it("re-confines a directory when its parent is swapped immediately before enumeration", async () => {
+    await write("src/deep/a.ts", "inside\n")
+    await Fs.mkdir(NodePath.join(outside, "deep"))
+    await Fs.writeFile(NodePath.join(outside, "deep", "outside-private-filename"), "outside\n")
+    const target = at("src/deep")
+    const options = { root: await canonical(), what: "directory" }
+    const entry = await SafeFs.resolveDirectory(target, options)
+    const io: SafeFs.Io = {
+      ...SafeFs.defaultIo,
+      readdir: async (path, limit) => {
+        await Fs.rename(at("src"), at("parked"))
+        await Fs.symlink(outside, at("src"))
+        return SafeFs.defaultIo.readdir(path, limit)
+      }
+    }
+
+    await expect(SafeFs.listDirectory(target, entry!, { ...options, io }))
+      .rejects.toThrow(/resolves outside the workspace/)
+  })
+
+  it("lists an unchanged confined directory", async () => {
+    await write("src/a.ts", "inside\n")
+    const target = at("src")
+    const options = { root: await canonical(), what: "directory" }
+    const entry = await SafeFs.resolveDirectory(target, options)
+
+    expect((await SafeFs.listDirectory(target, entry!, options)).map((entry) => entry.name))
+      .toEqual(["a.ts"])
+  })
+
   it("refuses a directory replaced between its check and its listing", async () => {
     await write("src/a.ts", "a\n")
     await write("other/b.ts", "b\n")

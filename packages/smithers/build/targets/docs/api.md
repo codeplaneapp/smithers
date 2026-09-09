@@ -81,7 +81,9 @@ before emitting its mounts or profile. The workspace must remain stable until
 the operating system consumes those paths.
 
 `SafeFs` is the confined filesystem seam: no-follow reads, bounded sizes, and
-one meaning for absent. `GeneratedFile` writes and drift-checks a generated
+one meaning for absent. Directory listings recheck workspace confinement and
+device/inode identity after enumeration, refusing entries if the directory was
+replaced. `GeneratedFile` writes and drift-checks a generated
 file; its `DriftError` carries a `reason` of `missing`, `drifted`, or
 `unreadable`, because only the first two are answered by regenerating.
 
