@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { createBugWorker } from "../src/worker.ts";
 import { repoName } from "../src/repoRequests.ts";
 import { memoryKv } from "./helpers/memoryKv.ts";
+import { memoryRepoCompletions } from "./helpers/memoryRepoCompletions.ts";
 import type { BugWorkerEnv } from "../src/env.ts";
 
 function fixture() {
   const env: BugWorkerEnv = { BUGS: memoryKv(), BUG_ADMIN_TOKEN: "test-admin", RESEND_API_KEY: "test-key", NOTIFICATION_FROM: "Smithers <test@example.com>" };
+  env.REPO_COMPLETIONS = memoryRepoCompletions(env);
   const calls: { url: string; init?: RequestInit }[] = [];
   let emailStatus = 200;
   let github: unknown = { private: false, license: { spdx_id: "MIT" } };
@@ -82,6 +84,80 @@ describe("public repository requests", () => {
     expect((await f.complete()).status).toBe(200);
     expect(await (await f.call()).json()).toMatchObject({ repos: [{ status: "ready", appUrl: "https://app.smithers.sh/repos/owner/repo" }] });
     expect(await (await f.call({ repo: "owner/repo", email: "later@example.com" })).json()).toMatchObject({ repo: { status: "ready" }, subscribed: false });
+  });
+  test("concurrent conflicting completions publish and notify only the winning URL", async () => {
+    const f = fixture();
+    await f.call({ repo: "owner/repo", email: "one@example.com" });
+    const get = f.env.BUGS.get.bind(f.env.BUGS);
+    let arrivals = 0;
+    let release!: () => void;
+    const both = new Promise<void>((resolve) => { release = resolve; });
+    // Hold both null readiness reads so neither request can publish first.
+    f.env.BUGS.get = async (key) => {
+      const value = await get(key);
+      if (key === "repo-ready:owner/repo" && arrivals < 2) {
+        if (++arrivals === 2) release();
+        await both;
+      }
+      return value;
+    };
+    const responses = await Promise.all(["first", "second"].map((path) =>
+      f.call({ repo: "owner/repo", appUrl: `https://app.smithers.sh/${path}` }, "/complete", true)));
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    const winner = await responses.find((response) => response.status === 200)!.json();
+    const ready = JSON.parse((await get("repo-ready:owner/repo"))!);
+    expect(ready.appUrl).toBe(winner.repo.appUrl);
+    const emails = f.calls.filter((call) => call.url.includes("resend"));
+    expect(emails).toHaveLength(1);
+    expect(JSON.parse(String(emails[0]!.init!.body)).text).toContain(winner.repo.appUrl);
+    expect((await f.call({ repo: "owner/repo", appUrl: winner.repo.appUrl }, "/complete", true)).status).toBe(200);
+    expect(JSON.parse((await get("repo-ready:owner/repo"))!)).toEqual(ready);
+  });
+  test("completion preserves URLs published before the durable coordinator was introduced", async () => {
+    const f = fixture();
+    await f.call({ repo: "owner/repo" });
+    const ready = { appUrl: "https://app.smithers.sh/legacy", completedAt: "2026-01-01T00:00:00.000Z" };
+    await f.env.BUGS.put("repo-ready:owner/repo", JSON.stringify(ready));
+    expect((await f.complete()).status).toBe(409);
+    expect((await f.call({ repo: "owner/repo", appUrl: ready.appUrl }, "/complete", true)).status).toBe(200);
+    expect(JSON.parse((await f.env.BUGS.get("repo-ready:owner/repo"))!)).toEqual(ready);
+  });
+  test("a failed readiness mirror cannot let a retry publish a different URL", async () => {
+    const f = fixture();
+    await f.call({ repo: "owner/repo", email: "one@example.com" });
+    const put = f.env.BUGS.put.bind(f.env.BUGS);
+    f.env.BUGS.put = async (key, value, options) => {
+      if (key.startsWith("repo-ready:")) throw new Error("KV unavailable");
+      return put(key, value, options);
+    };
+    expect((await f.complete()).status).toBe(503);
+    expect(f.calls.filter((call) => call.url.includes("resend"))).toHaveLength(0);
+    f.env.BUGS.put = put;
+    expect((await f.call({ repo: "owner/repo", appUrl: "https://app.smithers.sh/other" }, "/complete", true)).status).toBe(409);
+    expect((await f.complete()).status).toBe(200);
+    expect(JSON.parse((await f.env.BUGS.get("repo-ready:owner/repo"))!).appUrl).toBe("https://app.smithers.sh/repos/owner/repo");
+    expect(f.calls.filter((call) => call.url.includes("resend"))).toHaveLength(1);
+  });
+  test("stale KV readiness cannot overwrite the durable publication", async () => {
+    const f = fixture();
+    await f.call({ repo: "owner/repo" });
+    expect((await f.complete()).status).toBe(200);
+    const get = f.env.BUGS.get.bind(f.env.BUGS);
+    const original = await get("repo-ready:owner/repo");
+    f.env.BUGS.get = (key) => key === "repo-ready:owner/repo" ? Promise.resolve(null) : get(key);
+    expect((await f.call({ repo: "OWNER/REPO", appUrl: "https://app.smithers.sh/other" }, "/complete", true)).status).toBe(409);
+    expect((await f.complete()).status).toBe(200);
+    expect(await get("repo-ready:owner/repo")).toBe(original);
+    await f.call({ repo: "owner/another" });
+    expect((await f.call({ repo: "owner/another", appUrl: "https://app.smithers.sh/another" }, "/complete", true)).status).toBe(200);
+  });
+  test("completion fails closed without the durable binding", async () => {
+    const f = fixture();
+    await f.call({ repo: "owner/repo", email: "one@example.com" });
+    delete f.env.REPO_COMPLETIONS;
+    expect((await f.complete()).status).toBe(503);
+    expect(await f.env.BUGS.get("repo-ready:owner/repo")).toBeNull();
+    expect(f.calls.filter((call) => call.url.includes("resend"))).toHaveLength(0);
   });
   test("notifies all subscribers once and retries failures without rolling back readiness", async () => {
     const f = fixture();

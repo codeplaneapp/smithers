@@ -135,11 +135,20 @@ export async function handleRepoRequests(request: Request, env: BugWorkerEnv, de
         if (appUrl.protocol !== "https:" || !["smithers.sh", "app.smithers.sh", "canary.smithers.sh"].includes(appUrl.hostname) || appUrl.username || appUrl.password || appUrl.port) {
           return json(400, { error: "Use an HTTPS URL on a Smithers app domain." });
         }
-        if (ready && ready.appUrl !== appUrl.href) return json(409, { error: "This repository already has a published app URL." });
-        if (!ready) {
-          ready = { appUrl: appUrl.href, completedAt: new Date(deps.now()).toISOString() };
-          await env.BUGS.put(`repo-ready:${name}`, JSON.stringify(ready));
+        if (!env.REPO_COMPLETIONS) return json(503, { error: "Repository completion is unavailable." });
+        const committed = await env.REPO_COMPLETIONS.getByName(name).fetch(new Request("https://repo-completion/", {
+          method: "POST",
+          body: JSON.stringify({ name, candidate: { appUrl: appUrl.href, completedAt: new Date(deps.now()).toISOString() } }),
+        }));
+        if (!committed.ok) throw new Error("Repository completion failed");
+        const winner = await committed.json() as Ready;
+        if (winner.appUrl !== appUrl.href) return json(409, { error: "This repository already has a published app URL." });
+        // Mirror only the durable winner for public reads and scheduled delivery.
+        // A failed mirror is repaired by retrying the same completion.
+        if (!ready || ready.appUrl !== winner.appUrl || ready.completedAt !== winner.completedAt) {
+          await env.BUGS.put(`repo-ready:${name}`, JSON.stringify(winner));
         }
+        ready = winner;
       }
       if (!ready) return json(409, { error: "Repository is still smithering." });
       // Publishing and delivery are separate: notification failure cannot undo readiness.

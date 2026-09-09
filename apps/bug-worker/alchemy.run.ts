@@ -1,8 +1,9 @@
 /**
  * Alchemy 2 stack for bug.smithers.sh. Importing it deploys nothing.
  *
- * One Cloudflare Worker (entry: src/worker.ts) plus one KV namespace for bug
- * reports and the per-IP rate-limit counters. The smithers.sh zone lives on
+ * One Cloudflare Worker (entry: src/worker.ts), a repository completion Durable
+ * Object, and one KV namespace for bug reports and per-IP rate-limit counters.
+ * The smithers.sh zone lives on
  * this Cloudflare account (migrated from Vercel DNS 2026-06-25), so the
  * Worker serves bug.smithers.sh as a custom domain directly.
  *
@@ -40,6 +41,7 @@ export const workerProps = {
   crons: ["*/10 * * * *"],
   env: {
     BUGS: bugs,
+    REPO_COMPLETIONS: Cloudflare.DurableObject("RepoCompletion"),
     ...(process.env.RESEND_API_KEY ? { RESEND_API_KEY: Config.redacted("RESEND_API_KEY") } : {}),
     ...(process.env.NOTIFICATION_FROM ? { NOTIFICATION_FROM: process.env.NOTIFICATION_FROM } : {}),
     ...(process.env.GITHUB_FORK_TOKEN ? { GITHUB_FORK_TOKEN: Config.redacted("GITHUB_FORK_TOKEN") } : {}),

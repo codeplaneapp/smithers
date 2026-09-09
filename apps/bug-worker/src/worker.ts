@@ -5,6 +5,7 @@ import { handleRepoClaims } from "./repoClaims.ts";
 import { handleRepoRequests, retryRepoNotifications } from "./repoRequests.ts";
 
 export type { BugWorkerEnv, BugKv } from "./env.ts";
+export { RepoCompletion } from "./RepoCompletion.ts";
 
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 const RATE_LIMIT_PER_HOUR = 20;

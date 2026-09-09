@@ -141,8 +141,16 @@ Email addresses never appear in public responses. They live under
 under `repo-request:`, counts under `repo-nominations:`, the leaderboard under
 `repo-nominations-top`, and completion under
 `repo-ready:`. Notification receipts use `repo-notified:`, forks use
-`repo-fork:`, and claims use `repo-claim:`. There are no additional database
-bindings or migrations.
+`repo-fork:`, and claims use `repo-claim:`.
+
+Completion uses the `REPO_COMPLETIONS` Durable Object binding, keyed by the
+normalized repository name. A storage transaction commits the first URL;
+conflicting completions return 409 even when KV reads are stale. Existing KV
+publications are adopted on first use. Alchemy provisions the `RepoCompletion`
+class and its storage migration with the Worker. Missing binding returns 503.
+The committed record is mirrored to `repo-ready:` before returning success or
+sending notifications. If that KV write fails, retry completion with the same
+URL to repair the mirror; another URL cannot replace the committed record.
 
 ## Validation and deployment
 

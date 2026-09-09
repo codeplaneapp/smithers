@@ -16,6 +16,10 @@ export interface BugKv {
  */
 export interface BugWorkerEnv {
   BUGS: BugKv;
+  /** Atomic repository publication. Missing binding disables completion. */
+  REPO_COMPLETIONS?: {
+    getByName(name: string): { fetch(request: Request): Promise<Response> };
+  };
   /** Shared secret required in the x-bug-admin header for GET /api/bugs/:id. */
   BUG_ADMIN_TOKEN: string;
   /** Public origin used for the returned bug URL, e.g. https://bug.smithers.sh */
