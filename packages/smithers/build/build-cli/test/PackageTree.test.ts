@@ -21,6 +21,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     ...original,
     default: original,
     copyFile: vi.fn(original.copyFile),
+    chmod: vi.fn(original.chmod),
+    rename: vi.fn(original.rename),
     lstat: async (path: NodeFs.PathLike): Promise<NodeFs.Stats> => {
       const stats = await original.lstat(path)
       if (lstatSizeOverride.path === String(path)) {
@@ -139,7 +141,7 @@ describe("materializeManifest never writes through a symlink out of the tree", (
     expect(escaped).toBe(false)
   })
 
-  it("materializes a normal tree atomically", async () => {
+  it("materializes a fully staged normal tree", async () => {
     const cas = NodePath.join(root, ".flows", "cas")
     await Fs.mkdir(cas, { recursive: true })
     const digest = sha256("art")
@@ -1216,4 +1218,152 @@ describe("the ignored census skips the build directory a declared toolchain owns
       await PackageTree.releaseIgnored(snapshot)
     }
   })
+})
+
+describe("materialization publication ownership and cleanup", () => {
+  const manifest = (outDir: string, digest: string): PackageTree.OutDirManifest => ({
+    outDir,
+    entries: [{ path: "next.txt", kind: "file", digest, executable: false, target: "" }]
+  })
+  const seed = async (): Promise<string> => {
+    const digest = sha256("next")
+    await Fs.mkdir(NodePath.join(root, ".flows/cas"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, ".flows/cas", digest), "next")
+    return digest
+  }
+  const strand = async (name: string): Promise<string> => {
+    const backup = NodePath.join(root, name)
+    await Fs.mkdir(backup)
+    await Fs.writeFile(NodePath.join(backup, "previous.txt"), "previous alpha")
+    return backup
+  }
+
+  for (const succeeds of [true, false]) {
+    for (const legacy of [true, false]) {
+      it(`preserves ${legacy ? "unowned legacy" : "alpha-owned"} backups during ${succeeds ? "successful" : "failed"} beta publication`, async () => {
+        const digest = await seed()
+        const owner = sha256(NodePath.join(root, "alpha"))
+        const backup = await strand(legacy ? ".smthrs-old-crashed" : `.smthrs-old-${owner}-crashed`)
+        const publish = PackageTree.materializeManifest(
+          root,
+          ".flows",
+          manifest("beta", succeeds ? digest : "0".repeat(64))
+        )
+        if (succeeds) await publish
+        else await expect(publish).rejects.toThrow()
+        expect(await Fs.readFile(NodePath.join(backup, "previous.txt"), "utf8")).toBe("previous alpha")
+        await expect(Fs.lstat(NodePath.join(root, "beta/previous.txt"))).rejects.toMatchObject({ code: "ENOENT" })
+        if (succeeds) expect(await Fs.readFile(NodePath.join(root, "beta/next.txt"), "utf8")).toBe("next")
+      })
+    }
+  }
+
+  it("recovers only the requested destination before failed staging", async () => {
+    const alpha = await strand(`.smthrs-old-${sha256(NodePath.join(root, "alpha"))}-crashed`)
+    const beta = await strand(`.smthrs-old-${sha256(NodePath.join(root, "beta"))}-crashed`)
+    await expect(PackageTree.materializeManifest(root, ".flows", manifest("alpha", "0".repeat(64)))).rejects.toThrow()
+    expect(await Fs.readFile(NodePath.join(root, "alpha/previous.txt"), "utf8")).toBe("previous alpha")
+    await expect(Fs.lstat(alpha)).rejects.toMatchObject({ code: "ENOENT" })
+    expect(await Fs.readFile(NodePath.join(beta, "previous.txt"), "utf8")).toBe("previous alpha")
+  })
+
+  it("leaves ambiguous backups untouched", async () => {
+    const prefix = `.smthrs-old-${sha256(NodePath.join(root, "alpha"))}`
+    const first = await strand(`${prefix}-first`)
+    const second = await strand(`${prefix}-second`)
+    await expect(PackageTree.materializeManifest(root, ".flows", manifest("alpha", "0".repeat(64)))).rejects.toThrow()
+    for (const backup of [first, second]) {
+      expect(await Fs.readFile(NodePath.join(backup, "previous.txt"), "utf8")).toBe("previous alpha")
+    }
+    await expect(Fs.lstat(NodePath.join(root, "alpha"))).rejects.toMatchObject({ code: "ENOENT" })
+  })
+
+  it("requires removal of a stranded publisher lock before recovering its backup", async () => {
+    const owner = sha256(NodePath.join(root, "alpha"))
+    const backup = await strand(`.smthrs-old-${owner}-crashed`)
+    const lock = NodePath.join(root, `.smthrs-lock-${owner}`)
+    await Fs.mkdir(lock)
+    const missing = manifest("alpha", "0".repeat(64))
+    await expect(PackageTree.materializeManifest(root, ".flows", missing)).rejects.toThrow(/publication lock/)
+    expect((await Fs.lstat(lock)).isDirectory()).toBe(true)
+    expect(await Fs.readFile(NodePath.join(backup, "previous.txt"), "utf8")).toBe("previous alpha")
+    await expect(Fs.lstat(NodePath.join(root, "alpha"))).rejects.toMatchObject({ code: "ENOENT" })
+
+    // Simulate the operator confirming the crashed publisher has stopped.
+    await Fs.rmdir(lock)
+    await expect(PackageTree.materializeManifest(root, ".flows", missing)).rejects.toMatchObject({ code: "ENOENT" })
+    expect(await Fs.readFile(NodePath.join(root, "alpha/previous.txt"), "utf8")).toBe("previous alpha")
+    expect((await Fs.readdir(root)).filter((name) => name.startsWith(".smthrs-"))).toEqual([])
+  })
+
+  it("documents the reader-visible absence window and excludes another publisher", async () => {
+    const digest = await seed()
+    await Fs.mkdir(NodePath.join(root, "alpha"))
+    await Fs.writeFile(NodePath.join(root, "alpha/previous.txt"), "previous")
+    const original = await vi.importActual<typeof Fs>("node:fs/promises")
+    const rename = vi.mocked(Fs.rename)
+    let observed = false
+    rename.mockImplementation(async (from, to) => {
+      await original.rename(from, to)
+      if (observed || String(from) !== NodePath.join(root, "alpha")) return
+      observed = true
+      await expect(Fs.lstat(NodePath.join(root, "alpha"))).rejects.toMatchObject({ code: "ENOENT" })
+      // A sibling may publish, but the same output (including an alias) must
+      // fail before it can recover the first publisher's set-aside tree.
+      await PackageTree.materializeManifest(root, ".flows", manifest("beta", digest))
+      await expect(PackageTree.materializeManifest(root, ".flows", manifest("./alpha", digest)))
+        .rejects.toThrow(/publication lock/)
+      expect(
+        (await Fs.lstat(NodePath.join(root, `.smthrs-lock-${sha256(NodePath.join(root, "alpha"))}`))).isDirectory()
+      )
+        .toBe(true)
+    })
+    try {
+      await PackageTree.materializeManifest(root, ".flows", manifest("alpha", digest))
+      expect(observed).toBe(true)
+      expect(await Fs.readFile(NodePath.join(root, "alpha/next.txt"), "utf8")).toBe("next")
+      expect((await Fs.readdir(root)).filter((name) => name.startsWith(".smthrs-"))).toEqual([])
+    } finally {
+      rename.mockReset().mockImplementation(original.rename)
+    }
+  })
+
+  it("documents staged publication without promising atomic visibility", async () => {
+    const source = await Fs.readFile(new URL("../src/PackageTree.ts", import.meta.url), "utf8")
+    const jsdoc = source.slice(
+      source.lastIndexOf("/**", source.indexOf("export const materializeManifest")),
+      source.indexOf("export const materializeManifest")
+    )
+    expect(jsdoc).toContain("brief absence window")
+    expect(jsdoc).not.toContain("atomically")
+  })
+
+  it("leaves no copied file temporary after an obstructed destination on repeated attempts", async () => {
+    const digest = await seed()
+    await Fs.mkdir(NodePath.join(root, "output"))
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(PackageTree.materializeFile(root, ".flows", { path: "output", digest, executable: false })).rejects
+        .toThrow()
+      expect((await Fs.readdir(root)).filter((name) => name.startsWith("output.smthrs-"))).toEqual([])
+    }
+  })
+
+  for (const operation of ["copyFile", "chmod"] as const) {
+    it(`removes a partial file after failed ${operation} and preserves the error`, async () => {
+      const digest = await seed()
+      const original = await vi.importActual<typeof Fs>("node:fs/promises")
+      const failure = new Error(`injected ${operation} failure`)
+      if (operation === "copyFile") {
+        vi.mocked(Fs.copyFile).mockImplementationOnce(async (_from, to) => {
+          await original.writeFile(to, "partial")
+          throw failure
+        })
+      } else {
+        vi.mocked(Fs.chmod).mockRejectedValueOnce(failure)
+      }
+      await expect(PackageTree.materializeFile(root, ".flows", { path: "output", digest, executable: false })).rejects
+        .toBe(failure)
+      expect((await Fs.readdir(root)).filter((name) => name.startsWith("output.smthrs-"))).toEqual([])
+    })
+  }
 })

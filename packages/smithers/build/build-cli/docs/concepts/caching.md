@@ -118,10 +118,23 @@ tampered store instead of leaving it poisoned for every later run.
 Restoring is bounded on both ends. A manifest read back from the cache is
 untrusted input, so every path it names is confined to the node's declared
 outputs before anything is written, and every blob is verified before the tree
-is materialized. Publication is a rename swap: the tree is built whole as a
-temporary sibling, the previous tree is moved aside, the new one takes its
-place, and a failed swap puts the previous tree back rather than leaving the
-output absent.
+is materialized. Publication stages the whole tree in a temporary sibling,
+then moves the previous tree aside and renames the staged tree into place.
+These are two separate renames with a brief absence window at the output path.
+Readers that require continuous visibility must coordinate with publishers.
+If the publication rename fails, restoration of the previous tree is attempted;
+if restoration also fails, the error identifies the preserved backup.
+
+Staging trees and backups include a hash of the canonical destination path.
+A per-output filesystem lock protects recovery and publication across processes;
+a competing publisher fails immediately and may retry after the owner finishes.
+A process crash can leave this lock behind. Remove the named
+`.smthrs-lock-<destination>` directory only after confirming no publisher still
+owns it, then retry. If the output is absent, recovery restores only its uniquely
+owned backup. Legacy `.smthrs-old-<stamp>` backups without destination ownership
+and multiple matching backups require operator recovery and are never guessed.
+Single-file restoration removes copied temporary files after copy, chmod, or
+rename failures when cleanup is possible, preserving the original error.
 
 The capture walk holds declared ceilings on depth, entry count, path bytes,
 per-file bytes, and total bytes. A tree that crosses one aborts the capture

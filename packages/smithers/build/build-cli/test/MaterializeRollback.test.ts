@@ -3,8 +3,8 @@
  *
  * The swap is two renames with nothing between them. A failure of the second
  * used to remove the temp tree, leave the declared output absent, and strand
- * the previous tree beside it as `.smthrs-old-<stamp>` — worse than either the
- * old state or the new one. Injecting the failure needs the module boundary,
+ * the previous tree beside it as `.smthrs-old-<destination>-<stamp>`, worse than
+ * either the old state or the new one. Injecting the failure needs the module boundary,
  * so this file mocks `node:fs/promises` and therefore stands apart from the
  * rest of the artifact-store suite.
  */
@@ -117,7 +117,7 @@ const seed = async (): Promise<string> => {
 describe("materializeManifest publishes or restores, never neither", () => {
   it("recovers one crash-stranded old tree before a successful publish", async () => {
     const digest = await seedBlob()
-    const stranded = NodePath.join(root, ".smthrs-old-crashed")
+    const stranded = NodePath.join(root, `.smthrs-old-${sha256(NodePath.join(root, "dist"))}-crashed`)
     await RealFs.mkdir(stranded)
     await RealFs.writeFile(NodePath.join(stranded, "previous.txt"), "previous")
 

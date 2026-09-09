@@ -1753,9 +1753,14 @@ export const materializeFile = async (
   await Fs.mkdir(NodePath.dirname(destination), { recursive: true })
   await confinedParent(root, destination, manifest.path)
   const temporary = `${destination}.smthrs-${tempToken()}`
-  await Fs.copyFile(blob, temporary)
-  await Fs.chmod(temporary, manifest.executable ? 0o755 : 0o644)
-  await Fs.rename(temporary, destination)
+  try {
+    await Fs.copyFile(blob, temporary)
+    await Fs.chmod(temporary, manifest.executable ? 0o755 : 0o644)
+    await Fs.rename(temporary, destination)
+  } finally {
+    // Cleanup must not replace the copy, chmod, or publication error.
+    await Fs.rm(temporary, { force: true }).catch(() => {})
+  }
 }
 
 const safeManifestPath = /^(?!\.\.(\/|$))(?!\/)[^\0]+$/
@@ -1858,8 +1863,8 @@ export const verifyManifestBlobs = async (
   return undefined
 }
 
-/** Restores the only prior tree stranded by a crash between publish renames. */
-const recoverStrandedTree = async (parent: string, absolute: string): Promise<void> => {
+/** Restores a destination-owned backup while its publication lock is held. */
+const recoverStrandedTree = async (parent: string, absolute: string, owner: string): Promise<void> => {
   try {
     await Fs.lstat(absolute)
     return
@@ -1867,16 +1872,24 @@ const recoverStrandedTree = async (parent: string, absolute: string): Promise<vo
     if (errno(cause) !== "ENOENT") throw cause
   }
   const oldTrees = (await Fs.readdir(parent, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith(".smthrs-old-"))
-  // Exactly one is a crash this invocation can undo. Two or more means another
-  // publish is in flight or crashed too, and guessing which tree is the output
-  // would publish the wrong bytes; they are left for an operator.
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(`.smthrs-old-${owner}-`))
+  // Never infer ownership of legacy generic names or sibling backups. More
+  // than one owned backup is ambiguous too, so leave those for an operator.
   if (oldTrees.length === 1) await Fs.rename(NodePath.join(parent, oldTrees[0]!.name), absolute)
 }
 
 /**
- * Materializes one manifest tree atomically: the tree is fully built as a
- * temp sibling, then rename-swapped over the outDir root.
+ * Materializes one manifest tree by fully staging a sibling, then publishing
+ * with two renames. Replacing an existing output has a brief absence window;
+ * readers must coordinate with publishers when they require continuous
+ * visibility. A failed publication rename attempts rollback; if rollback also
+ * fails, the error identifies the preserved backup.
+ *
+ * A destination-specific filesystem lock excludes competing publishers and
+ * protects recovery of that destination's backup. Contention fails immediately.
+ * After a process crash, remove its stranded lock only after confirming the
+ * publisher has stopped, then retry to recover its uniquely owned backup.
+ * Legacy unowned backups and ambiguous backups are left for an operator.
  *
  * @category artifacts
  * @since 0.1.0
@@ -1892,10 +1905,22 @@ export const materializeManifest = async (
   await confinedAncestor(root, absolute, manifest.outDir)
   await Fs.mkdir(parent, { recursive: true })
   await confinedParent(root, absolute, manifest.outDir)
-  await recoverStrandedTree(parent, absolute)
+  // Canonicalize the parent so alternate workspace paths share one lock and
+  // backup namespace, without following an existing output-root symlink.
+  const owner = createHash("sha256")
+    .update(NodePath.join(await Fs.realpath(parent), NodePath.basename(absolute)))
+    .digest("hex")
   const stamp = tempToken()
-  const temp = NodePath.join(parent, `.smthrs-mat-${stamp}`)
+  const temp = NodePath.join(parent, `.smthrs-mat-${owner}-${stamp}`)
+  const lock = NodePath.join(parent, `.smthrs-lock-${owner}`)
   try {
+    await Fs.mkdir(lock)
+  } catch (cause) {
+    if (errno(cause) !== "EEXIST") throw cause
+    throw new Error(`materialize publication lock exists for ${manifest.outDir}: ${lock}`, { cause })
+  }
+  try {
+    await recoverStrandedTree(parent, absolute, owner)
     await Fs.mkdir(temp, { recursive: true })
     // The temp tree is a sibling of the destination, so proving every entry
     // stays under `tempReal` proves nothing if `tempReal` itself already left
@@ -1922,7 +1947,7 @@ export const materializeManifest = async (
         await Fs.chmod(destination, entry.executable ? 0o755 : 0o644)
       }
     }
-    const old = NodePath.join(parent, `.smthrs-old-${stamp}`)
+    const old = NodePath.join(parent, `.smthrs-old-${owner}-${stamp}`)
     let hadOld = false
     try {
       await Fs.rename(absolute, old)
@@ -1940,8 +1965,8 @@ export const materializeManifest = async (
     } catch (cause) {
       // The swap is the publication point. Without this, a failure here left
       // the declared output absent and the previous tree stranded beside it as
-      // `.smthrs-old-<stamp>`, which is worse than either the old state or the
-      // new one.
+      // `.smthrs-old-<destination>-<stamp>`, which is worse than either the old
+      // state or the new one.
       if (hadOld) {
         try {
           await Fs.rename(old, absolute)
@@ -1957,8 +1982,10 @@ export const materializeManifest = async (
     await syncForPublish(parent)
     if (hadOld) await Fs.rm(old, { recursive: true, force: true })
   } catch (cause) {
-    await Fs.rm(temp, { recursive: true, force: true })
+    await Fs.rm(temp, { recursive: true, force: true }).catch(() => {})
     throw cause
+  } finally {
+    await Fs.rmdir(lock).catch(() => {})
   }
 }
 
