@@ -50,7 +50,12 @@ const check = Smithers.Typecheck({
 const unitTests = Smithers.NodeTest({
   runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.testSuite(["tests"]),
-  srcs: [...sources, ...suiteSources],
+  srcs: [
+    ...sources,
+    ...suiteSources,
+    Smithers.file("//packages/smithers/package.json"),
+    Smithers.file("//apps/bug-worker/package.json")
+  ],
   deps: [],
   cwd
 })

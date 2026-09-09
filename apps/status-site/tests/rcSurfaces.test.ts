@@ -15,14 +15,28 @@ const status = JSON.parse(readFileSync(new URL("../site/status.json", import.met
   components: Array<{ id: string; name: string; url?: string; description?: string; status: string }>;
 };
 const homeHtml = readFileSync(new URL("../site/index.html", import.meta.url), "utf8");
-const cliManifest = JSON.parse(
-  readFileSync(new URL("../../../packages/smithers/package.json", import.meta.url), "utf8"),
-) as { name: string };
-const bugWorkerManifest = JSON.parse(
-  readFileSync(new URL("../../bug-worker/package.json", import.meta.url), "utf8"),
-) as { description: string };
+const manifestPaths = {
+  cli: "packages/smithers/package.json",
+  bugWorker: "apps/bug-worker/package.json",
+};
+const readManifest = (path: string) =>
+  JSON.parse(readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8"));
+const cliManifest = readManifest(manifestPaths.cli) as { name: string };
+const bugWorkerManifest = readManifest(manifestPaths.bugWorker) as { description: string };
 
 const componentById = new Map(status.components.map((component) => [component.id, component]));
+
+describe("the suite's declared inputs", () => {
+  const packageSource = readFileSync(new URL("../PACKAGE.ts", import.meta.url), "utf8");
+  const unitTestSources = packageSource.match(
+    /const unitTests = Smithers\.NodeTest\(\{[\s\S]*?srcs:\s*\[([\s\S]*?)\]/,
+  )?.[1];
+
+  test.each(Object.values(manifestPaths))("declares the consumed manifest %s", (path) => {
+    expect(unitTestSources).toBeDefined();
+    expect(unitTestSources).toContain(`Smithers.file("//${path}")`);
+  });
+});
 
 describe("the components name the surfaces this repository actually publishes", () => {
   test("CLI distribution names the published package", () => {

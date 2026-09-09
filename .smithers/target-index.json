@@ -6796,6 +6796,14 @@
         "kind": "glob",
         "pattern": "apps/status-site/tests/**/*.ts",
         "exclude": []
+      },
+      {
+        "kind": "file",
+        "path": "packages/smithers/package.json"
+      },
+      {
+        "kind": "file",
+        "path": "apps/bug-worker/package.json"
       }
     ],
     "outputs": [],
