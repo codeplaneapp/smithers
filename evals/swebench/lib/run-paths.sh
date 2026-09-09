@@ -30,6 +30,14 @@
 # Both reach a shell path, a docker container name and a docker image name, and
 # this script's output is `eval`ed, so a value that is not `<repo>__<issue>` or
 # `r<digits>` stops before any of that.
+#
+# `SWB_ARTIFACT_ROOT` moves every artifact root off the checkout. It is the one
+# supported way for a test to drive this derivation without writing into the
+# wave artifacts of the checkout it is running in: `fixtures/check-matrix.mjs`
+# replays the matrix scheduler over fixed stub instance ids, and two of those
+# replays at once would otherwise write, measure and delete one another's
+# `patches/stub__*.patch`. It is honoured only when set, so a run that does not
+# set it derives exactly what it derived before.
 set -euo pipefail
 export LC_ALL=C
 
@@ -42,6 +50,28 @@ case "$HARNESS" in
   flows|codex) ;;
   *) echo "run-paths.sh: harness must be flows or codex, got '${HARNESS}'" >&2; exit 2 ;;
 esac
+
+# The override reaches the same shell paths the checkout path does, so it is
+# validated on the same terms. Absolute, because a relative root would resolve
+# against whichever directory a run script happened to be started from and put
+# one wave's artifacts in two places; and an existing directory, because a
+# misspelled root would silently scatter a wave rather than stop.
+ARTIFACT_ROOT="$S"
+if [ -n "${SWB_ARTIFACT_ROOT:-}" ]; then
+  case "$SWB_ARTIFACT_ROOT" in
+    *$'\r'*|*$'\n'*)
+      echo "run-paths.sh: SWB_ARTIFACT_ROOT must not contain CR or LF" >&2; exit 2 ;;
+    /*) ;;
+    *)
+      echo "run-paths.sh: SWB_ARTIFACT_ROOT must be an absolute path, got '${SWB_ARTIFACT_ROOT}'" >&2
+      exit 2 ;;
+  esac
+  if [ ! -d "$SWB_ARTIFACT_ROOT" ]; then
+    echo "run-paths.sh: SWB_ARTIFACT_ROOT must be an existing directory, got '${SWB_ARTIFACT_ROOT}'" >&2
+    exit 2
+  fi
+  ARTIFACT_ROOT="$SWB_ARTIFACT_ROOT"
+fi
 
 # Validate complete arguments, never individual lines accepted by grep.
 for VALUE in "$INSTANCE" "$INDEX"; do
@@ -94,20 +124,20 @@ SLUG="$(printf '%s' "$INSTANCE" | tr '_.' '--')"
 # the checkout works the way an agent expects, because jj no longer writes the
 # task repository's index either.
 if [ "$HARNESS" = "flows" ]; then
-  WORK_ROOT="$S/work"
-  VCS_ROOT="$S/work/.vcs"
-  PATCH_ROOT="$S/patches"
-  TIMINGS_ROOT="$S/timings"
-  LOG_ROOT="$S/logs-agent"
+  WORK_ROOT="$ARTIFACT_ROOT/work"
+  VCS_ROOT="$ARTIFACT_ROOT/work/.vcs"
+  PATCH_ROOT="$ARTIFACT_ROOT/patches"
+  TIMINGS_ROOT="$ARTIFACT_ROOT/timings"
+  LOG_ROOT="$ARTIFACT_ROOT/logs-agent"
   CONTAINER="flowsbench-${SLUG}${SUFFIX}"
 else
-  WORK_ROOT="$S/work-codex"
-  PATCH_ROOT="$S/patches-codex"
-  TIMINGS_ROOT="$S/timings-codex"
-  LOG_ROOT="$S/logs-codex"
+  WORK_ROOT="$ARTIFACT_ROOT/work-codex"
+  PATCH_ROOT="$ARTIFACT_ROOT/patches-codex"
+  TIMINGS_ROOT="$ARTIFACT_ROOT/timings-codex"
+  LOG_ROOT="$ARTIFACT_ROOT/logs-codex"
   # The codex harness snapshots nothing, so it needs no store; the key is still
   # printed so both harnesses `eval` the same set of names.
-  VCS_ROOT="$S/work-codex/.vcs"
+  VCS_ROOT="$ARTIFACT_ROOT/work-codex/.vcs"
   CONTAINER="codexbench-${SLUG}${SUFFIX}"
 fi
 
@@ -125,5 +155,5 @@ printf 'TIMINGS=%q\n' "$TIMINGS_ROOT/${INSTANCE}${SUFFIX}.json"
 printf 'LOG_ROOT=%q\n' "$LOG_ROOT"
 printf 'LOG_PREFIX=%q\n' "$LOG_ROOT/${INSTANCE}${SUFFIX}"
 printf 'CONTAINER=%q\n' "$CONTAINER"
-printf 'JOURNAL_ROOT=%q\n' "$S/journals"
-printf 'JOURNAL=%q\n' "$S/journals/${INSTANCE}${SUFFIX}"
+printf 'JOURNAL_ROOT=%q\n' "$ARTIFACT_ROOT/journals"
+printf 'JOURNAL=%q\n' "$ARTIFACT_ROOT/journals/${INSTANCE}${SUFFIX}"

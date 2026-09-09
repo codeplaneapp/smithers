@@ -17,6 +17,7 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
 const root = resolve(import.meta.dirname, "..")
@@ -27,11 +28,11 @@ const names = [
   "CONTAINER", "JOURNAL_ROOT", "JOURNAL"
 ]
 
-const paths = (harness, instance, index, base = root, cwd = root) => {
+const paths = (harness, instance, index, base = root, cwd = root, env = {}) => {
   const result = spawnSync(
     join(base, "lib/run-paths.sh"),
     index === undefined ? [harness, instance] : [harness, instance, index],
-    { encoding: "utf8" }
+    { encoding: "utf8", env: { ...process.env, ...env } }
   )
   assert.equal(result.status, 0, result.stderr)
   // Decode with Bash, as the runners do: %q output is shell syntax, and values
@@ -47,9 +48,15 @@ const paths = (harness, instance, index, base = root, cwd = root) => {
   return Object.fromEntries(names.map((name, index) => [name, values[index]]))
 }
 
-const refuses = (args) => {
-  const result = spawnSync(join(root, "lib/run-paths.sh"), args, { encoding: "utf8" })
+const refuses = (args, env = {}) => {
+  const result = spawnSync(join(root, "lib/run-paths.sh"), args, {
+    encoding: "utf8",
+    env: { ...process.env, ...env }
+  })
   assert.equal(result.status, 2, `expected a refusal for ${args.join(" ")}`)
+  // A refusal prints no assignments, so a caller that `eval`s the output of a
+  // script it did not check has nothing to evaluate.
+  assert.equal(result.stdout, "", `a refusal prints nothing for ${args.join(" ")}`)
   return result.stderr
 }
 
@@ -137,6 +144,58 @@ assert.equal(codexLane.LOG_PREFIX, join(root, "logs-codex", `${instance}-r90c`))
 assert.equal(codexLane.CONTAINER, "codexbench-django--django-16612-r90c")
 assert.notEqual(codexLane.WORK, paths("codex", instance, "r90").WORK)
 assert.notEqual(flowsLane.PATCH, paths("flows", instance, "r90c").PATCH)
+
+// ---------------------------------------------------------------------------
+// An artifact root somewhere else: `SWB_ARTIFACT_ROOT`
+//
+// The rule is the checkout's, moved. It exists so a test can drive this
+// derivation without writing into the wave artifacts of the checkout it runs in
+// — `fixtures/check-matrix.mjs` replays the matrix scheduler over fixed stub
+// ids, and two of those replays at once would otherwise share one set of files.
+// Unset, nothing about a production run changes; that is what every assertion
+// above already reads.
+// ---------------------------------------------------------------------------
+const artifacts = mkdtempSync(join(tmpdir(), "swb-artifact-root-"))
+try {
+  const rooted = ["WORK_ROOT", "WORK", "VCS_ROOT", "VCS", "PATCH_ROOT", "PATCH",
+    "TIMINGS_ROOT", "TIMINGS", "LOG_ROOT", "LOG_PREFIX", "JOURNAL_ROOT", "JOURNAL"]
+  for (const harness of ["flows", "codex"]) {
+    for (const index of [undefined, "r3", "r90c"]) {
+      const here = paths(harness, instance, index)
+      const there = paths(harness, instance, index, root, root, { SWB_ARTIFACT_ROOT: artifacts })
+      for (const name of rooted) {
+        assert.equal(there[name], here[name].replace(root, artifacts), name)
+      }
+      // A container name is a docker name, not a path, so it is the same run
+      // wherever its artifacts are written; so are the run's own identifiers.
+      for (const name of ["RUN_INDEX", "RUN_ID", "SUFFIX", "CONTAINER"]) {
+        assert.equal(there[name], here[name], name)
+      }
+      // Empty is unset: an exported-but-blank variable is the checkout.
+      const blank = paths(harness, instance, index, root, root, { SWB_ARTIFACT_ROOT: "" })
+      assert.deepEqual(blank, here)
+    }
+  }
+
+  // Malformed roots stop here, for the same reason a malformed instance id
+  // does: the value reaches a shell path and this script's output is `eval`ed.
+  assert.match(
+    refuses(["flows", instance, "r1"], { SWB_ARTIFACT_ROOT: "relative/artifacts" }),
+    /SWB_ARTIFACT_ROOT must be an absolute path/u
+  )
+  assert.match(
+    refuses(["flows", instance, "r1"], { SWB_ARTIFACT_ROOT: join(artifacts, "absent") }),
+    /SWB_ARTIFACT_ROOT must be an existing directory/u
+  )
+  for (const separator of ["\n", "\r", "\r\n"]) {
+    assert.match(
+      refuses(["codex", instance], { SWB_ARTIFACT_ROOT: `${artifacts}${separator}$(touch marker)` }),
+      /SWB_ARTIFACT_ROOT must not contain CR or LF/u
+    )
+  }
+} finally {
+  rmSync(artifacts, { recursive: true, force: true })
+}
 
 // ---------------------------------------------------------------------------
 // What it refuses, before any of it reaches a path or a container name

@@ -17,7 +17,7 @@
  */
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -27,9 +27,12 @@ const temporary = mkdtempSync(join(tmpdir(), "flows-swebench-matrix-"))
 /**
  * Fake instances, named so that nothing can mistake them for dataset members.
  *
- * The patch root is the rig's own `patches/`, because that is where
- * `lib/run-paths.sh` says a run's patch goes and the point of the test is that
- * the driver reads the same answer. The files are removed at the end.
+ * Their artifacts go under this run's own temporary directory, named by the
+ * same `lib/run-paths.sh` the rig uses, through the `SWB_ARTIFACT_ROOT`
+ * override: the point of the test is still that the stub and the driver read
+ * one answer, and the ids are fixed, so writing them under the checkout's
+ * `patches/` would put two verification runs on one set of files — each
+ * measuring sizes the other was rewriting and deleting.
  */
 const instances = ["stub__alpha", "stub__beta", "stub__gamma"]
 const rounds = 3
@@ -49,7 +52,27 @@ const solo = "stub__solo"
 const ledger = join(temporary, "ledger.txt")
 const soloLedger = join(temporary, "solo-ledger.txt")
 
+// Every artifact root a run derives, rebased onto the temporary directory by
+// `SWB_ARTIFACT_ROOT`. A real run's `run-instance.sh` creates them; a stubbed
+// run does not, so the fixture creates the one its stub writes into.
+const artifactRoots = [
+  "work", "work-codex", "patches", "patches-codex",
+  "timings", "timings-codex", "logs-agent", "logs-codex", "journals"
+]
+
+// What the checkout's artifact roots hold, so the same reading after the runs
+// can say the fixture neither added to them nor took from them. Compared as a
+// before and after rather than as an emptiness, because a wave's own artifacts
+// are none of this fixture's business.
+const checkoutArtifacts = () => Object.fromEntries(artifactRoots.map((name) => [
+  name,
+  existsSync(join(root, name)) ? readdirSync(join(root, name)).sort() : []
+]))
+
+const before = checkoutArtifacts()
+
 try {
+  mkdirSync(join(temporary, "patches"), { recursive: true })
   writeFileSync(
     join(temporary, "dataset.json"),
     JSON.stringify(instances.map((id) => ({
@@ -92,6 +115,7 @@ exit 0
       encoding: "utf8",
       env: {
         ...process.env,
+        SWB_ARTIFACT_ROOT: temporary,
         SWB_RUN_CMD: stub,
         SWB_SAMPLE: join(temporary, "sample.json"),
         SWB_DATASET: join(temporary, "dataset.json"),
@@ -202,6 +226,7 @@ exit 0
     encoding: "utf8",
     env: {
       ...process.env,
+      SWB_ARTIFACT_ROOT: temporary,
       SWB_RUN_CMD: soloStub,
       SWB_SAMPLE: join(temporary, "solo-sample.json"),
       SWB_DATASET: join(temporary, "solo-dataset.json"),
@@ -219,13 +244,32 @@ exit 0
     ["S r1", "E r1", "S r2", "E r2", "S r3", "E r3"],
     "three rounds of one instance run one at a time, with three jobs available"
   )
-} finally {
-  for (const id of [...instances, solo]) {
+  // ---------------------------------------------------------------------
+  // Where the artifacts went. The override is the whole reason this fixture
+  // can run twice at once: every patch the stub wrote is under the temporary
+  // root, and the checkout's own artifact roots hold exactly what they held
+  // before, which a wave running beside this one may be adding to as it does.
+  // ---------------------------------------------------------------------
+  for (const id of instances) {
     for (let round = 1; round <= rounds; round++) {
-      rmSync(join(root, "patches", `${id}-r${round}.patch`), { force: true })
-      rmSync(join(root, "patches", `${id}-r${round}.patch.untracked`), { force: true })
+      assert.ok(
+        existsSync(join(temporary, "patches", `${id}-r${round}.patch`)),
+        `${id}-r${round}.patch was written under the artifact root`
+      )
     }
   }
+  for (let round = 1; round <= rounds; round++) {
+    assert.ok(
+      existsSync(join(temporary, "patches", `${solo}-r${round}.patch`)),
+      `${solo}-r${round}.patch was written under the artifact root`
+    )
+  }
+  assert.deepEqual(
+    checkoutArtifacts(),
+    before,
+    "the fixture neither wrote to nor deleted from the checkout's artifact roots"
+  )
+} finally {
   rmSync(temporary, { recursive: true, force: true })
 }
 

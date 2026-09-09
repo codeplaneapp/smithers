@@ -955,6 +955,18 @@ before emitting output. Instance ids match `<repo>__<issue>` with ASCII letters,
 digits, `.`, `_` and `-`, starting each part with a letter or digit. Every output
 assignment uses Bash shell escaping (`printf %q`) for the runners' `eval`.
 
+Every root in the table hangs off this directory unless `SWB_ARTIFACT_ROOT`
+names another one, in which case the whole set moves there and the names inside
+it are unchanged. It is honoured only when set, so a wave that does not set it
+derives what it always did, and it must be an existing absolute directory: a
+relative root would resolve against whichever directory a run script was started
+from, and a misspelled one would scatter a wave instead of stopping it. Container
+names are docker names rather than paths and do not move. It exists so a test can
+drive this derivation without writing into the artifacts of the checkout it runs
+in — `fixtures/check-matrix.mjs` replays the scheduler over fixed stub instance
+ids, and two of those replays at once would otherwise write, measure and delete
+one another's `patches/stub__*.patch`.
+
 The journal archive carries the **patch's** suffix rather than the run index, so
 the journal and the patch a selection is made from always come from one run. Key
 the archive by the index instead and a hand run, whose patch is `<id>.patch`,
@@ -963,8 +975,9 @@ ranks a journal against a patch another run wrote and nothing says they came
 apart.
 
 `fixtures/check-run-paths.mjs`, in `verify.sh`, pins the whole table, proves five
-rounds name five distinct sets on both sides, and proves the run scripts derive
-their names from that one file rather than spelling them again.
+rounds name five distinct sets on both sides, proves an artifact root elsewhere
+moves every path and no identifier, and proves the run scripts derive their names
+from that one file rather than spelling them again.
 
 ### Disk
 
@@ -1040,7 +1053,10 @@ order.
 `SWB_RUN_CMD` pointing at a stub that records its own start and end. It asserts
 from that ledger that the two rules held, that the driver did overlap runs at
 all, and that the manifest it wrote agrees with what the runs actually did — no
-docker, no model, no tokens.
+docker, no model, no tokens. Its stub instance ids are fixed, so it runs under an
+`SWB_ARTIFACT_ROOT` of its own and asserts the checkout's artifact roots are the
+same before and after: two verification runs at once, or one beside a live wave,
+never share a patch.
 
 It runs the scheduler twice, because one pass cannot check both rules. With three
 instances and two jobs the concurrency bound already serializes an instance's
