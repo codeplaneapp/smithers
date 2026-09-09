@@ -13,7 +13,7 @@ into its current action table and provides
 file contains no JJ command implementation, HTTP credential, or native receipt
 store. A host without the installed adapter fails clearly when it calls it.
 
-The new **internal** `NativeCoding` Effect service exposes `read(changeIds?)` and
+The new **internal** `NativeCoding` Effect service exposes `read(changeIds?, historyLimit?)` and
 `apply(operation)`; ordinary `ReadNative` and `ApplyNative` actions record those
 requests/results in the existing flow. For example, after reading an exact
 resolved revision in a recorded planning step:
@@ -78,6 +78,14 @@ The ordinary runtime attaches the ambient parent and recovers completed children
 after restart. It refuses unavailable or unverified project flows.
 
 ## Host composition
+
+`planning.ts` adds the private `PreparePlan` workflow: verified wiki and native
+history gathering, a request review, an optional durable clarification, a model
+draft, and source verification before binding the existing `Plan` schema. See
+[planning.md](planning.md) for composition, new internal context/draft shapes,
+native-history window rules, and the current deployment-authority requirement.
+The default memory action reuses the existing wiki verifier and keyword scorer;
+it refuses stale documentation and does not yet regenerate it automatically.
 
 `registration.ts` is private repository configuration, not a new package API.
 Register `RunPlan` as a delegate when constructing the host's existing executable

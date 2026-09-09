@@ -38,7 +38,8 @@ export const Operation = Schema.Union([
 export type Operation = typeof Operation.Type
 export const ReadResult = Schema.Struct({
   status: Schema.Literal("read"), operationId: OperationId, head: NativeRevision,
-  revisions: Schema.Array(NativeRevision)
+  revisions: Schema.Array(NativeRevision),
+  history: Schema.optionalKey(Schema.Array(NativeRevision))
 })
 export const OperationResult = Schema.Union([
   Schema.Struct({
@@ -65,7 +66,7 @@ export const requestIdFor = (executionId: string, actionKey: string): string => 
 }
 
 export class NativeCoding extends Context.Service<NativeCoding, {
-  readonly read: (changeIds?: ReadonlyArray<string>) => Effect.Effect<typeof ReadResult.Type, NativeCodingError>
+  readonly read: (changeIds?: ReadonlyArray<string>, historyLimit?: number) => Effect.Effect<typeof ReadResult.Type, NativeCodingError>
   readonly apply: (operation: Operation) => Effect.Effect<OperationResult, NativeCodingError>
 }>()("coding/NativeCoding") {}
 
@@ -119,7 +120,9 @@ export const nativeLayer = (options: NativeOptions) => Layer.effect(NativeCoding
     })
   )
   return {
-    read: (changeIds: ReadonlyArray<string> = []) => invoke({ operation: "read", changeIds }).pipe(
+    read: (changeIds: ReadonlyArray<string> = [], historyLimit?: number) => invoke({
+      operation: "read", changeIds, ...(historyLimit === undefined ? {} : { historyLimit })
+    }).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(ReadResult)),
       Effect.mapError(error => error instanceof NativeCodingError ? error : failure("invalid_receipt", "Native read returned an invalid revision"))
     ),
