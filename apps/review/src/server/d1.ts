@@ -33,4 +33,5 @@ export interface D1PreparedStatement {
 export interface D1Database {
   prepare(query: string): D1PreparedStatement;
   exec(query: string): Promise<D1ExecResult>;
+  batch(statements: D1PreparedStatement[]): Promise<D1Result[]>;
 }

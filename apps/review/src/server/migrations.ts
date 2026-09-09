@@ -40,6 +40,16 @@ const SCHEMA_STATEMENTS = [
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS usage_events_repo_idx ON usage_events(repo, created_at)`,
+  `CREATE TABLE IF NOT EXISTS usage_reservations (
+    id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    session_hash TEXT,
+    cost_usd REAL NOT NULL CHECK (cost_usd > 0),
+    created_at INTEGER NOT NULL,
+    settlement_json TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS usage_reservations_repo_idx ON usage_reservations(repo)`,
+  `CREATE INDEX IF NOT EXISTS usage_reservations_session_idx ON usage_reservations(session_hash)`,
   `CREATE TABLE IF NOT EXISTS reviewed_prs (
     repo TEXT NOT NULL,
     pr INTEGER NOT NULL,

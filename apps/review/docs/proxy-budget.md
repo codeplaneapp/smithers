@@ -1,0 +1,34 @@
+# Proxy budget admission
+
+`POST /anthropic/v1/messages` accepts only models priced in
+`src/server/proxy/modelPrices.ts`, including eight-digit snapshot suffixes.
+Unknown models and context-window aliases return 400 before forwarding.
+
+Requests must include integer `max_tokens` from 1 through 64000 and fit in
+48000 UTF-8 bytes. Only text, thinking history and local tool calls/results
+are supported. Images, documents, remote sources, server tools, one-hour
+cache writes, beta headers, compressed bodies and extra top-level fields
+return 400. These restrictions keep input below the long-context threshold
+and exclude charges that the token price table cannot represent.
+
+Admission reserves the output-token maximum plus a conservative input bound
+of four tokens per serialized byte and 4096 framing tokens. All input is
+reserved at the highest input/cache rate. A single conditional SQL insert
+checks session spend and repository month-to-date spend plus all outstanding
+reservations. API-key caps also include reservations. At most four requests
+per repository may be outstanding. Insufficient headroom returns 402;
+unavailable accounting returns 503. Small completed spend alone does not
+imply enough headroom for another request.
+
+Each admission generates a request ID. Settlement uses it as the usage-event
+primary key and commits the session debit, event and reservation release in
+one D1 batch. Replaying settlement records once. A failed batch retains the
+hold and its persisted settlement payload; the next request for that repo
+retries pending settlements before admission.
+
+Definite upstream errors without usage release their holds. Transport errors,
+redirect failures and successful responses without readable usage retain
+holds for operator reconciliation. Holds never expire automatically, including
+across UTC month boundaries. This prevents a stalled or interrupted call from
+reopening budget that may already have been spent. Operators must reconcile
+unresolved holds against provider usage before removing them.

@@ -56,7 +56,7 @@ function proxyRequest(token: string) {
   return new Request("https://review.test/anthropic/v1/messages", {
     method: "POST",
     headers: { "x-api-key": token, "content-type": "application/json" },
-    body: '{"model":"claude-sonnet-4-6","messages":[]}',
+    body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
   });
 }
 
@@ -120,7 +120,7 @@ describe("anthropic proxy redirect hardening", () => {
     expect(upstream.requests[1].headers["x-api-key"]).toBe("sk-ant-test");
     expect(new URL(upstream.requests[1].url).pathname).toBe("/v1/messages-moved");
     expect(upstream.requests[1].method).toBe("POST");
-    expect(upstream.requests[1].body).toBe('{"model":"claude-sonnet-4-6","messages":[]}');
+    expect(upstream.requests[1].body).toBe('{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}');
     // The redirected stream still meters.
     await Promise.all(meterings);
     const row = await env.DB.prepare("SELECT * FROM usage_events").first<Record<string, unknown>>();

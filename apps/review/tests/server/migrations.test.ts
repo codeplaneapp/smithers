@@ -21,6 +21,7 @@ function alterFailingD1(message: string): D1Database {
   return {
     prepare: (query: string) => (/ALTER TABLE/i.test(query) ? failing : base.prepare(query)),
     exec: (query: string) => base.exec(query),
+    batch: (statements) => base.batch(statements),
   };
 }
 
@@ -31,7 +32,11 @@ describe("ensureSchema", () => {
     // per-instance guard does not short-circuit) re-runs the ALTERs and must
     // swallow their duplicate-column errors.
     await ensureSchema(db);
-    await ensureSchema({ prepare: (q: string) => db.prepare(q), exec: (q: string) => db.exec(q) });
+    await ensureSchema({
+      prepare: (q: string) => db.prepare(q),
+      exec: (q: string) => db.exec(q),
+      batch: (s) => db.batch(s),
+    });
     // Both cache columns exist: inserting them round-trips.
     await db
       .prepare(

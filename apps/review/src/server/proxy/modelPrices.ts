@@ -43,30 +43,21 @@ const PRICES: Record<string, ModelPrice> = {
   "claude-haiku-4-5": { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
 };
 
-const FREE: ModelPrice = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
-
 /**
  * Looks up the per-million-token price for a model id.
  *
- * Matches the base id plus any `-` or `_` date-stamp suffix and any bracketed
- * context-window alias such as `claude-opus-4-8[1m]`, so a real model is never
- * metered as free. An unknown id still records token counts and prices at zero
- * until its numbers are added above.
+ * Matches only a priced base id or an eight-digit snapshot suffix. Unknown
+ * ids throw so admission and settlement both fail closed. Context-window
+ * aliases and arbitrary suffixes require explicit pricing before admission.
  *
  * @since 1.0.0
  * @category constructors
  */
 export function modelPrices(model: string): ModelPrice {
-  const normalized = String(model ?? "").toLowerCase();
   for (const [key, price] of Object.entries(PRICES)) {
-    if (
-      normalized === key ||
-      normalized.startsWith(`${key}-`) ||
-      normalized.startsWith(`${key}_`) ||
-      normalized.startsWith(`${key}[`)
-    ) {
+    if (model === key || (model.startsWith(`${key}-`) && /^\d{8}$/.test(model.slice(key.length + 1)))) {
       return price;
     }
   }
-  return FREE;
+  throw new Error(`unpriced model: ${model}`);
 }

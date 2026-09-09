@@ -5,8 +5,12 @@ import { repoMonthlySpendUsd } from "../repoMonthlySpendUsd.ts";
 import { lookupRepo } from "../sessions/lookupRepo.ts";
 import { anthropicEndpointAllowed } from "./anthropicEndpointAllowed.ts";
 import { authenticateProxyRequest } from "./authenticateProxyRequest.ts";
-import { parseUsageFromJson } from "./parseUsageFromJson.ts";
-import { parseUsageFromSse } from "./parseUsageFromSse.ts";
+import { completedUsage } from "./completedUsage.ts";
+import { randomTokenHex } from "../randomTokenHex.ts";
+import { modelPrices } from "./modelPrices.ts";
+import { priceRequest } from "./priceRequest.ts";
+import { reserveUsage } from "./reserveUsage.ts";
+import { retryUsage } from "./retryUsage.ts";
 import { recordUsage } from "./recordUsage.ts";
 
 export interface HandleAnthropicDeps {
@@ -95,8 +99,8 @@ function teeForMetering(upstream: Response): { passthrough: ReadableStream; coll
         acc += decoder.decode(value, { stream: true });
       }
       acc += decoder.decode();
-    } catch {
-      /* upstream closed unexpectedly; whatever we have is what we record */
+    } finally {
+      reader.releaseLock();
     }
     return acc;
   })();
@@ -132,15 +136,13 @@ export async function handleAnthropic(
   let sessionHash: string | null = null;
   let spendCapUsd = Number.POSITIVE_INFINITY;
   let spentUsd = 0;
+  let repoCapUsd: number | null = null;
   if (auth.kind === "session") {
     repo = auth.repo;
     pr = auth.pr;
     sessionHash = auth.hash;
     spendCapUsd = auth.spendCapUsd;
-    // Re-read spent_usd at admission: concurrent streaming requests meter via
-    // waitUntil after their streams close, so the row read during auth can be
-    // stale. A fresh read narrows (not eliminates) the over-spend window
-    // without a full reservation system.
+    // Early errors are diagnostic; reserveUsage below serializes admission.
     const fresh = await env.DB.prepare("SELECT spent_usd FROM sessions WHERE hash = ?")
       .bind(auth.hash)
       .first<{ spent_usd: number }>();
@@ -155,6 +157,7 @@ export async function handleAnthropic(
     const registration = await lookupRepo(env.DB, repo);
     if (registration) {
       const monthlyCapUsd = repoMonthlyCapUsd(registration);
+      repoCapUsd = monthlyCapUsd;
       const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
       if (monthSpendUsd >= monthlyCapUsd) {
         return jsonError(402, "repo monthly spend cap exhausted", {
@@ -190,6 +193,7 @@ export async function handleAnthropic(
       return jsonError(403, "repo not registered", { repo });
     }
     const monthlyCapUsd = repoMonthlyCapUsd(registration);
+    repoCapUsd = Math.min(monthlyCapUsd, auth.spendCapUsd ?? monthlyCapUsd);
     const monthSpendUsd = await repoMonthlySpendUsd(env.DB, repo, now);
     if (monthSpendUsd >= monthlyCapUsd) {
       return jsonError(402, "repo monthly spend cap exhausted", {
@@ -213,9 +217,23 @@ export async function handleAnthropic(
   upstreamHeaders.set("x-api-key", env.ANTHROPIC_API_KEY);
   upstreamHeaders.set("anthropic-version", upstreamHeaders.get("anthropic-version") ?? "2023-06-01");
 
-  let upstreamBody: ArrayBuffer | undefined;
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    upstreamBody = await request.arrayBuffer();
+  let priced: Awaited<ReturnType<typeof priceRequest>>;
+  try {
+    priced = await priceRequest(request);
+  } catch (err) {
+    return jsonError(400, "request has no bounded price", { detail: String(err) });
+  }
+  const requestId = randomTokenHex(16);
+  try {
+    await retryUsage(env.DB, repo);
+    if (!(await reserveUsage(env.DB, { requestId, repo, sessionHash, repoCapUsd, costUsd: priced.costUsd, now }))) {
+      return jsonError(402, "spend cap or in-flight limit prevents reservation", {
+        repo,
+        reservedCostUsd: priced.costUsd,
+      });
+    }
+  } catch (err) {
+    return jsonError(503, "budget admission unavailable", { detail: String(err) });
   }
 
   let upstream: Response;
@@ -224,7 +242,7 @@ export async function handleAnthropic(
       url: upstreamUrl,
       method: request.method,
       headers: upstreamHeaders,
-      body: upstreamBody,
+      body: priced.body,
     });
     if (result.kind === "cross_origin_redirect") {
       // The injected key was NOT sent to (and never will be sent to) the
@@ -242,6 +260,9 @@ export async function handleAnthropic(
   }
 
   if (!upstream.body) {
+    if (upstream.status >= 400) {
+      await env.DB.prepare("DELETE FROM usage_reservations WHERE id = ?").bind(requestId).run();
+    }
     const text = await upstream.text();
     const headers = new Headers({
       "content-type": upstream.headers.get("content-type") ?? "application/json",
@@ -258,8 +279,13 @@ export async function handleAnthropic(
 
   const metering = (async () => {
     const body = await collected;
-    const summary = contentType.includes("text/event-stream") ? parseUsageFromSse(body) : parseUsageFromJson(body);
+    const summary = completedUsage(body, contentType.includes("text/event-stream"));
     if (!summary) {
+      // A definite upstream rejection spends no inference budget. Ambiguous
+      // transport/2xx failures keep the hold; never reopen budget blindly.
+      if (upstream.status >= 400) {
+        await env.DB.prepare("DELETE FROM usage_reservations WHERE id = ?").bind(requestId).run();
+      }
       // A 2xx /v1/messages response that yields no usage is a metering MISS
       // (unexpected body shape), not a benign non-content frame — real spend
       // goes unrecorded. Surface it so Workers logs can catch a parser drift.
@@ -273,7 +299,17 @@ export async function handleAnthropic(
       }
       return;
     }
+    const responsePrice = modelPrices(summary.model);
+    const admittedPrice = modelPrices(priced.model);
+    if (
+      Object.keys(admittedPrice).some(
+        (key) => responsePrice[key as keyof typeof responsePrice] !== admittedPrice[key as keyof typeof admittedPrice],
+      )
+    ) {
+      throw new Error("upstream model price differs from admitted model");
+    }
     await recordUsage(env.DB, {
+      requestId,
       sessionHash,
       repo,
       pr,
@@ -286,6 +322,7 @@ export async function handleAnthropic(
     // unmetered-spend hole. Log (do not rethrow — the response already
     // streamed) so the drop is diagnosable in production.
     console.error("smithers-review: metering failed", {
+      requestId,
       repo,
       pr,
       path: proxiedPath,

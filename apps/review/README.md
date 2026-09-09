@@ -185,3 +185,6 @@ and key management, the `review.smithers.sh` domain.
 Architecture, the publish service, self-hosted CI setup with your own
 credentials, diff rendering exports, and the test suites are documented in
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+See [proxy budget admission](docs/proxy-budget.md) for supported requests,
+reservation limits and settlement recovery.

@@ -182,7 +182,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": "unknown" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -206,7 +206,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -248,7 +248,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -293,7 +293,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -328,7 +328,7 @@ describe("anthropic proxy", () => {
         new Request("https://review.test/anthropic/v1/messages", {
           method: "POST",
           headers: { "x-api-key": token, "content-type": "application/json" },
-          body: '{"model":"claude-sonnet-4-6","messages":[]}',
+          body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
         }),
         env,
       );
@@ -344,16 +344,30 @@ describe("anthropic proxy", () => {
     expect(usage.results.length).toBe(0);
   });
 
-  test("records all in-flight usage even when concurrent calls cross the spend cap", async () => {
+  test("records every admitted call when a cap is lowered while calls are in flight", async () => {
     const env = await buildTestEnv();
     const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
     teardowns.push(() => fixture.stop());
-    const token = await seedSession(env, REPO, SINGLE_CALL_COST_USD + 0.00001);
+    const token = await seedSession(env, REPO, 1);
     const meterings: Promise<unknown>[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const worker = createReviewWorker({
       jwksUrl: "http://unused",
       anthropicBaseUrl: fixture.baseUrl,
-      fetchUpstream: fetch,
+      fetchUpstream: (async () =>
+        new Response(
+          new ReadableStream({
+            async start(controller) {
+              await held;
+              controller.enqueue(new TextEncoder().encode(SSE_USAGE));
+              controller.close();
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        )) as unknown as typeof fetch,
       now: () => Date.now(),
       waitUntil: (p) => meterings.push(p),
     });
@@ -362,7 +376,7 @@ describe("anthropic proxy", () => {
         new Request("https://review.test/anthropic/v1/messages", {
           method: "POST",
           headers: { "x-api-key": token, "content-type": "application/json" },
-          body: '{"model":"claude-sonnet-4-6","messages":[]}',
+          body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
         }),
         env,
       );
@@ -370,11 +384,15 @@ describe("anthropic proxy", () => {
     const [first, second] = await Promise.all([makeRequest(), makeRequest()]);
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
+    await env.DB.prepare("UPDATE sessions SET spend_cap_usd = ?")
+      .bind(SINGLE_CALL_COST_USD + 0.00001)
+      .run();
+    release();
     await Promise.all([first.text(), second.text()]);
     await Promise.all(meterings);
 
     // Both calls were forwarded and billed at Anthropic, so both must land in the
-    // audit ledger and the spend tally — the cap stops the NEXT request, it cannot
+    // audit ledger and the spend tally. Lowering a cap cannot
     // un-spend an already-streamed one. Previously the over-cap call was silently
     // dropped from both usage_events and spent_usd, undercounting real spend.
     const usage = await env.DB.prepare("SELECT cost_usd FROM usage_events").all<{ cost_usd: number }>();
@@ -409,7 +427,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -456,7 +474,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": apiKey, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -487,7 +505,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": "srk_unknownkey" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -513,7 +531,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -555,7 +573,7 @@ describe("anthropic proxy", () => {
           "x-smithers-repo": "octo/wrenches",
           "content-type": "application/json",
         },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -589,7 +607,7 @@ describe("anthropic proxy", () => {
           "x-smithers-repo": "evil/other",
           "content-type": "application/json",
         },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -616,7 +634,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": apiKey, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -646,7 +664,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": apiKey, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -678,7 +696,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": apiKey, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -717,7 +735,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -750,7 +768,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -781,7 +799,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -819,7 +837,7 @@ describe("anthropic proxy", () => {
           "x-smithers-repo": "victim/repo",
           "content-type": "application/json",
         },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -847,7 +865,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": apiKey, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -883,7 +901,7 @@ describe("anthropic proxy", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": apiKey, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );

@@ -34,6 +34,10 @@ class SqlitePreparedStatement implements D1PreparedStatement {
   }
 
   async run(): Promise<D1Result> {
+    return this.runSync();
+  }
+
+  runSync(): D1Result {
     const stmt = this.db.query(this.query);
     const result = stmt.run(...(this.args as never[]));
     return {
@@ -52,6 +56,11 @@ class SqliteD1 implements D1Database {
 
   prepare(query: string): D1PreparedStatement {
     return new SqlitePreparedStatement(this.raw, query);
+  }
+
+  async batch(statements: D1PreparedStatement[]): Promise<D1Result[]> {
+    // No await inside the transaction: match D1 batch isolation and rollback.
+    return this.raw.transaction(() => statements.map((stmt) => (stmt as SqlitePreparedStatement).runSync()))();
   }
 
   async exec(query: string): Promise<D1ExecResult> {

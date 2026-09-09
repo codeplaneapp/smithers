@@ -161,7 +161,7 @@ describe("handleAnthropic gaps", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -184,7 +184,7 @@ describe("handleAnthropic gaps", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": token, "content-type": "application/json" },
-        body: "{}",
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       env,
     );
@@ -195,12 +195,13 @@ describe("handleAnthropic gaps", () => {
 
   test("logs 'metering failed' when the usage write throws", async () => {
     const env = await buildTestEnv();
-    // No repo registration → the request skips the monthly-cap read of usage_events.
     const token = await seedSession(env, "octo/widgets");
     const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
     teardowns.push(() => fixture.stop());
-    // Drop usage_events so recordUsage's INSERT throws inside the deferred metering.
-    await env.DB.exec("DROP TABLE usage_events");
+    // Admission must work; inject failure only at the event INSERT.
+    await env.DB.exec(
+      "CREATE TRIGGER fail_usage BEFORE INSERT ON usage_events BEGIN SELECT RAISE(ABORT, 'injected event failure'); END",
+    );
     const meterings: Promise<unknown>[] = [];
     const worker = fixedWorker({
       anthropicBaseUrl: fixture.baseUrl,
@@ -212,7 +213,7 @@ describe("handleAnthropic gaps", () => {
         new Request("https://review.test/anthropic/v1/messages", {
           method: "POST",
           headers: { "x-api-key": token, "content-type": "application/json" },
-          body: '{"model":"claude-sonnet-4-6","messages":[]}',
+          body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
         }),
         env,
       );
@@ -431,7 +432,7 @@ describe("worker default waitUntil branches", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": tokenA, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       envA,
       { waitUntil: (p: Promise<unknown>) => captured.push(p) },
@@ -448,7 +449,7 @@ describe("worker default waitUntil branches", () => {
       new Request("https://review.test/anthropic/v1/messages", {
         method: "POST",
         headers: { "x-api-key": tokenB, "content-type": "application/json" },
-        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+        body: '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[]}',
       }),
       envB,
     );

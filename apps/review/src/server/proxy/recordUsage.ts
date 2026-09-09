@@ -1,5 +1,4 @@
 import type { D1Database } from "../d1.ts";
-import { randomTokenHex } from "../randomTokenHex.ts";
 import { modelPrices } from "./modelPrices.ts";
 import type { UsageSummary } from "./parseUsage.ts";
 
@@ -8,14 +7,12 @@ export interface RecordedUsage {
   recorded: boolean;
 }
 
-/**
- * Append a usage_events row and increment the session's spent_usd. Cost comes
- * from the static modelPrices table; unknown models still record token counts
- * with cost 0 so dashboards see them and we can backfill later.
- */
+/** Commit the debit, idempotent ledger event and reservation release together. */
 export async function recordUsage(
   db: D1Database,
   options: {
+    /** Generated once at admission, reused for every settlement retry. */
+    requestId: string;
     sessionHash: string | null;
     repo: string;
     pr: number;
@@ -25,41 +22,48 @@ export async function recordUsage(
   },
 ): Promise<RecordedUsage> {
   const price = modelPrices(options.summary.model);
+  const counts = [
+    options.summary.inputTokens,
+    options.summary.outputTokens,
+    options.summary.cacheCreationTokens,
+    options.summary.cacheReadTokens,
+  ];
+  if (counts.some((n) => !Number.isSafeInteger(n) || n < 0)) throw new Error("invalid usage token count");
   const costUsd =
-    (options.summary.inputTokens * price.input) / 1_000_000 +
-    (options.summary.outputTokens * price.output) / 1_000_000 +
-    (options.summary.cacheCreationTokens * price.cacheWrite) / 1_000_000 +
-    (options.summary.cacheReadTokens * price.cacheRead) / 1_000_000;
-  if (options.sessionHash) {
-    // This request was already forwarded to Anthropic and its response streamed
-    // to the client — the cost is real money spent. Record it UNCONDITIONALLY.
-    // The cap is enforced pre-flight (handleAnthropic 402s the NEXT request once
-    // spent >= cap); it cannot un-spend an in-flight call. The previous
-    // conditional `... WHERE spent_usd + ? <= spend_cap_usd` dropped any call that
-    // crossed the cap from BOTH the spend tally and the usage_events audit log,
-    // systematically undercounting real Anthropic spend on every capped session.
-    await db
-      .prepare("UPDATE sessions SET spent_usd = spent_usd + ? WHERE hash = ?")
-      .bind(costUsd, options.sessionHash)
-      .run();
-  }
+    (options.summary.inputTokens * price.input +
+      options.summary.outputTokens * price.output +
+      options.summary.cacheCreationTokens * price.cacheWrite +
+      options.summary.cacheReadTokens * price.cacheRead) /
+    1_000_000;
+  // Persist the retry payload before attempting settlement. Failure of the batch
+  // leaves this payload AND the budget hold intact for the next repo request.
   await db
-    .prepare(
-      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(
-      randomTokenHex(8),
-      options.repo,
-      options.pr,
-      options.summary.model,
-      options.summary.inputTokens,
-      options.summary.outputTokens,
-      options.summary.cacheCreationTokens,
-      options.summary.cacheReadTokens,
-      costUsd,
-      options.kind,
-      options.now,
-    )
+    .prepare("UPDATE usage_reservations SET settlement_json = COALESCE(settlement_json, ?) WHERE id = ?")
+    .bind(JSON.stringify(options), options.requestId)
     .run();
-  return { costUsd, recorded: true };
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE sessions SET spent_usd = spent_usd + ? WHERE hash = ?
+      AND NOT EXISTS (SELECT 1 FROM usage_events WHERE id = ?)`,
+      )
+      .bind(costUsd, options.sessionHash, options.requestId),
+    db
+      .prepare(
+        `INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, kind, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+      )
+      .bind(
+        options.requestId,
+        options.repo,
+        options.pr,
+        options.summary.model,
+        ...counts,
+        costUsd,
+        options.kind,
+        options.now,
+      ),
+    db.prepare("DELETE FROM usage_reservations WHERE id = ?").bind(options.requestId),
+  ]);
+  return { costUsd, recorded: results[1].meta.changes === 1 };
 }
