@@ -38,12 +38,12 @@ const WORDMARK = [
 ]
 const lessons = [
   "Hello. I’m Smithers. Let me show how Smithers works",
-  "I can speak to you normally like this, in a normal chat message. Whenever this soft glow appears, it means I’m controlling that part of your workspace.",
+  "I am more than a chat app. I control this entire UI. And I will help you get work done. For example, let’s change the theme.",
+  "And back to light mode.",
   "I can send you notifications from time to time, like this. You don’t need to watch every flow to know what’s happening.",
   "I can talk to you with UI widgets, too. Here’s a small form so I can get to know you. Everything here is optional.",
   "But the coolest thing I can do is run flows. Flows are instructions that can be executed to get work done. Everything in this app is modeled as a flow.",
-  "Some flows are simple, like changing from light mode to dark mode. Watch the whole workspace.",
-  "Or back to light mode. That’s a real change to your app, made through a flow. The same idea scales all the way up to building a feature.",
+  "From time to time, I’ll create new flows that I think will be useful for you.",
   "Your work gets the whole window. I’ll stay out of the way until you call me. Press ⌘K (or Ctrl K) to bring me back.",
   "Plugins give this workspace its abilities. Start with the Library: a place to discover the flows and specialists you want to work with.",
   "The Librarian learns a codebase and makes it easier for both of us to understand. Add it, and I’ll walk you through its first two background flows.",
@@ -108,7 +108,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
   const saveSequence = useRef(0)
   const runCommandGuide = (action: string, value?: string) => {
     const args = `${action}${value === undefined ? "" : ` ${JSON.stringify(value)}`}`
-    if (action === "next" && stage === 3) {
+    if (action === "next" && stage === 4) {
       const sequence = ++saveSequence.current
       setSaveStatus("saving")
       void controller.commands.run("onboarding.act", args).then(
@@ -211,10 +211,10 @@ export function GuideShell({ children }: { children: ReactNode }) {
             return
           }
           if (event.key === "Enter" && target?.closest("button, a")) return
-          if (stage === 4 && event.key.toLowerCase() === "r") {
+          if (stage === 5 && event.key.toLowerCase() === "r") {
             event.preventDefault()
             if (!event.repeat) runCommandGuide("wait-flow")
-          } else if (stage === 2 && event.key.toLowerCase() === "n") {
+          } else if (stage === 3 && event.key.toLowerCase() === "n") {
             event.preventDefault()
             if (!event.repeat) runCommandGuide("notify")
           } else if (event.key === "ArrowRight" || event.key === "Enter") {
@@ -335,7 +335,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               </div>
             ))}
           </div>
-          {stage === 3 && (
+          {stage === 4 && (
             <form
               id="guide-profile"
               className="guide-form"
@@ -562,12 +562,12 @@ export function GuideShell({ children }: { children: ReactNode }) {
                */
             }
             <Fragment key={stage}>
-            {stage === 2 && (
+            {stage === 3 && (
               <button className="guide-text-button" aria-keyshortcuts="N" data-flow="onboarding.act" onClick={() => runCommandGuide("notify")}>
                 Send me a notification {keyHint("N")}
               </button>
             )}
-            {stage === 4 && (
+            {stage === 5 && (
               <div className="guide-flow-example">
                 <button className="guide-secondary" data-flow="onboarding.act" aria-keyshortcuts="R" disabled={guide.demoRun?.status === "running"} onClick={() => runCommandGuide("wait-flow")}>
                   Run a flow {keyHint("R")}
@@ -577,13 +577,13 @@ export function GuideShell({ children }: { children: ReactNode }) {
                 </p>
               </div>
             )}
-            {stage === 3 ? (
+            {stage === 4 ? (
               <button type="submit" form="guide-profile" aria-keyshortcuts="Enter ArrowRight" className="guide-primary" data-flow="onboarding.act">
                 Continue, with or without answers {keyHint()}
               </button>
-            ) : stage === 5 ? (
-              primary("Run dark-mode flow", "dark")
-            ) : stage === 6 ? (
+            ) : stage === 1 ? (
+              primary("Change theme", "dark")
+            ) : stage === 2 ? (
               primary("Bring back the light", "light")
             ) : stage === 7 ? (
               <button
@@ -609,7 +609,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
               primary(
                 stage === 0
                   ? "Let’s begin"
-                  : stage === 3
+                  : stage === 4
                     ? "Continue, with or without answers"
                     : stage === 10
                       ? "Let’s make something"

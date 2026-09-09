@@ -19,12 +19,12 @@ The reusable `smithers-control` glow means Smithers controls a surface: a faint 
 ## The playable sequence
 
 1. **Hello. I'm Smithers.** A calm personal introduction; one clear forward action.
-2. **Conversation.** “I can speak to you normally like this, in a normal chat message.” Explain the glow while the dialogue is glowing.
-3. **Notifications.** Explain the gentle tap on the shoulder and send a deliberate tutorial notification into the real app notification collection. Allow replay and dismissal.
-4. **UI widgets.** An optional form asks how the user found Smithers and what they would like to build. Both answers may be empty; Continue works without submission. State where answers are saved.
-5. **Flows.** Explain executable instructions as the common model for everything in the app.
-6. **Dark mode.** Run a real local theme transition and let the workspace change around the user.
-7. **Light mode.** Run the reverse transition. Nothing advances on a reading timer.
+2. **Control the UI.** “I am more than a chat app. I control this entire UI. And I will help you get work done. For example, let’s change the theme.” Enter or Change theme immediately runs the dark-mode transition. The glow explains itself visually.
+3. **Light mode.** Switch back to light mode with the next action.
+4. **Notifications.** Send a deliberate notification using the button or N.
+5. **UI widgets.** An optional form asks how the user found Smithers and what they want to build; answers are saved when continuing.
+6. **Flows.** Explain executable instructions and offer the five-second example with R.
+7. **New flows.** Smithers can create useful flows for the user.
 8. **Call me when you need me.** Hide the conversation; the user performs Command K / Control K (a touch/click fallback is available). The composer arrives floating in its transparent layer over the lesson; demonstrate Escape and restore focus.
 9. **Install Library.** Explain plugins as the way capabilities are added. The user's explicit action adds the Library to the empty sidebar.
 10. **Add Librarian.** Explain its wiki and mythical-history capabilities before revealing them.

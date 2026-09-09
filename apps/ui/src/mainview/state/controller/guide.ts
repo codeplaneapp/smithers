@@ -8,7 +8,7 @@ export function createGuideController(ctx: ControllerContext) {
     const guide: GuideState = { ...(ctx.store.session().guide ?? initialGuide()) }
     switch (action) {
       case "next":
-        if (guide.step === 3 && (guide.heard.trim() || guide.project.trim())) {
+        if (guide.step === 4 && (guide.heard.trim() || guide.project.trim())) {
           guide.responseId ??= crypto.randomUUID()
           await ctx.store.dispatch({ type: "guide.changed", actor: ctx.commandActor, guide }).isPersisted.promise
           try {
@@ -21,7 +21,7 @@ export function createGuideController(ctx: ControllerContext) {
               return "Your answers could not be saved. Please try again."
           } catch { return "Your answers could not be saved. Please try again." }
         }
-        if ([5, 6, 7, 8, 9, 12, 14].includes(guide.step)) return "Complete this lesson's action first."
+        if ([1, 2, 7, 8, 9, 12, 14].includes(guide.step)) return "Complete this lesson's action first."
         guide.step = Math.min(15, guide.step + 1)
         if (guide.step === 7) guide.conversationOpen = false
         break
@@ -61,7 +61,7 @@ export function createGuideController(ctx: ControllerContext) {
         guide.sound = !guide.sound
         break
       case "wait-flow": {
-        if (guide.step !== 4) return "Run this example in the flows lesson."
+        if (guide.step !== 5) return "Run this example in the flows lesson."
         if (guide.demoRun?.status === "running") return
         const id = crypto.randomUUID()
         guide.demoRun = { id, status: "running", startedAt: Date.now() }
@@ -95,7 +95,7 @@ export function createGuideController(ctx: ControllerContext) {
       }
       case "dark":
       case "light":
-        if (guide.step !== (action === "dark" ? 5 : 6))
+        if (guide.step !== (action === "dark" ? 1 : 2))
           return "This theme demonstration belongs to its lesson."
         ctx.store.dispatch({ type: "theme.changed", actor: "system", theme: action })
         guide.step++

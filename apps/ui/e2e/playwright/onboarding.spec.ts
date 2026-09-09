@@ -17,8 +17,11 @@ test("onboarding persists a real interaction and hands off to the conversation",
   expect(await greeting?.evaluate(node => node.isConnected)).toBe(true)
   /* The actions stay one thing: the same row, still mounted, as the new message arrives. */
   expect(await actions?.evaluate(node => node.isConnected)).toBe(true)
-  await expect(page.locator('[data-message-step="1"]')).toContainText("I can speak to you normally like this")
-  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.locator('[data-message-step="1"]')).toContainText("I am more than a chat app. I control this entire UI.")
+  await page.getByRole("button", { name: "Change theme" }).click()
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark")
+  await page.getByRole("button", { name: "Bring back the light" }).click()
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light")
   await page.getByRole("button", { name: "Send me a notification" }).click()
   await expect(page.getByText("You can keep working", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
@@ -31,13 +34,10 @@ test("onboarding persists a real interaction and hands off to the conversation",
   await page.getByLabel("What would you love to build?").focus()
   await page.reload()
   await expect(page.getByLabel("How did you hear about Smithers?")).toHaveValue('A friend called "Sam" ')
-  await expect(page.locator(".guide-transcript article")).toHaveCount(4)
+  await expect(page.locator(".guide-transcript article")).toHaveCount(5)
   await page.getByRole("button", { name: "Continue, with or without answers" }).click()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
-  await page.getByRole("button", { name: "Run dark-mode flow" }).click()
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark")
-  await page.getByRole("button", { name: "Bring back the light" }).click()
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light")
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
   await page.keyboard.press("Control+k")
   await expect(page.getByRole("dialog", { name: "Talk to Smithers" })).toBeVisible()
   await expect(page.getByRole("dialog").locator(".guide-summoned, .smithers-chat-message, .guide-dialogue")).toHaveCount(0)
@@ -96,16 +96,16 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
   const shell = page.locator(".guide-shell")
   await expect(shell).toHaveAttribute("data-step", "0")
   await expect(page.locator(".guide-actions .guide-primary .guide-button-key")).toHaveText("↵ Enter")
-  for (let step = 1; step <= 3; step++) {
+  for (let step = 1; step <= 4; step++) {
     await page.keyboard.press(step % 2 ? "Enter" : "ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
     await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
     await expect(page.locator(".guide-dialogue > p")).toHaveCount(step + 1)
-    if (step === 2) {
+    if (step === 3) {
       await expect(page.getByRole("button", { name: "Send me a notification" }).locator("kbd")).toHaveText("N")
       await page.keyboard.press("n")
       await expect(page.getByText("You can keep working", { exact: true })).toBeVisible()
-      await expect(shell).toHaveAttribute("data-step", "2")
+      await expect(shell).toHaveAttribute("data-step", "3")
     }
     if (step < 15) {
       await expect(page.locator(".guide-actions .guide-primary .guide-button-key").last()).toHaveText("↵ Enter")
@@ -122,10 +122,10 @@ test("the entire introduction is completable with only a keyboard", async ({ pag
   await page.keyboard.press("ArrowLeft")
   await page.keyboard.type("!")
   await expect(page.getByLabel("How did you hear about Smithers?")).toHaveValue("A friend told m!e")
-  await expect(shell).toHaveAttribute("data-step", "3")
-  await page.keyboard.press("Enter")
   await expect(shell).toHaveAttribute("data-step", "4")
-  for (let step = 5; step <= 7; step++) {
+  await page.keyboard.press("Enter")
+  await expect(shell).toHaveAttribute("data-step", "5")
+  for (let step = 6; step <= 7; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(shell).toHaveAttribute("data-step", String(step))
     await expect(page.locator(".guide-lesson h1, .guide-eyebrow, .guide-chapter, .guide-sigil")).toHaveCount(0)
@@ -202,7 +202,7 @@ test("Command K can replay the tutorial and reset a returning user", async ({ pa
 test("the flow lesson runs a five-second flow from its keyboard button", async ({ page }) => {
   await page.goto("/")
   await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "0")
-  for (let step = 1; step <= 4; step++) {
+  for (let step = 1; step <= 5; step++) {
     await page.keyboard.press("ArrowRight")
     await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", String(step))
   }
@@ -213,7 +213,7 @@ test("the flow lesson runs a five-second flow from its keyboard button", async (
   await expect(page.getByRole("button", { name: "Run a flow" })).toBeDisabled()
   await expect(page.getByText("Finished successfully.", { exact: true })).toBeVisible({ timeout: 8000 })
   expect(Date.now() - started).toBeGreaterThanOrEqual(5000)
-  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "4")
+  await expect(page.locator(".guide-shell")).toHaveAttribute("data-step", "5")
 })
 
 
