@@ -1260,7 +1260,14 @@ pid file (one an older copy of a run script is holding) is taken only once it is
 older than `SWB_LOCK_STALE`; `release` is a no-op unless the caller owns it; and
 every wait is bounded — `SWB_LOCK_TIMEOUT`, an hour, or `SWB_GRADE_LOCK_TIMEOUT`,
 two — so a wedged lane fails one run instead of hanging the benchmark.
-`fixtures/check-lock.sh`, inside `verify.sh`, proves all four.
+Creation, stale removal and release are serialized by an OS lock on the
+persistent sibling `<dir>.guard` file. Each new owner records a generation
+(pid plus a nonce). A stale remover compares the generation it inspected with
+the current one under the guard before deleting anything. Legacy locks use
+their device and inode as the generation. The guard uses Python 3's `fcntl`
+on macOS and Linux; its file must stay in place while the rig is in use.
+`fixtures/check-lock.sh`, inside `verify.sh`, also pauses a stale reclaimer
+until a replacement owner has acquired, then verifies that only one holds it.
 
 The driver reconciles both locks on the way in and again whenever a worker has
 gone an hour without finishing, and it only ever clears one whose owner is gone:
@@ -1635,12 +1642,11 @@ pull, run, grade, delete — is held inside a **two-slot semaphore** at
 `fullbench/.codex-slots`. Two is what the full benchmark already proved this
 machine sustains inside the 8 GiB disk gate.
 
-The semaphore is two `lib/lock.sh` locks rather than `flock`, for two reasons.
-`flock(1)` is a util-linux program and is not on macOS, which is the host this
-rig runs on. And a slot has to survive its holder being killed with `-9`: a
-`lib/lock.sh` slot records the holder's pid, so the next waiter takes a dead
-holder's slot on its next poll, while a lock released only by descriptor closure
-tells a waiter nothing about who is gone. It is the protocol `.extract-lock` and
+The semaphore is two `lib/lock.sh` locks. `flock(1)` is a util-linux program
+and is not on macOS, which is the host this rig runs on. The helper uses Python
+3's `fcntl.flock` only while changing lock metadata. The slot itself records
+the lane's pid and remains held after the acquire helper exits; the next waiter
+recovers it if that lane dies. It is the protocol `.extract-lock` and
 `.grade-lock` already use.
 
 One instance is also claimed by pid. Two invocations naming one id would be two

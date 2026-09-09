@@ -31,15 +31,16 @@
 #   is older than `--stale`, because liveness cannot be read off it;
 # - `release` removes the lock **only when the caller owns it**, so a stray
 #   release is a no-op;
-# - `acquire` re-reads the pid file after writing it, so of two processes that
-#   steal the same dead lock in the same instant exactly one keeps it;
+# - an OS lock on the persistent sibling `<dir>.guard` serializes creation,
+#   stale removal and release; removal revalidates the inspected generation
+#   under that guard, so a delayed reclaimer cannot delete a replacement;
 # - and the pid file also immunizes the lock against the old `rmdir` trap still
 #   running in another lane: `rmdir` refuses a non-empty directory.
 #
 # `--timeout` bounds the wait (an hour by default) and exits 1, because a
 # caller that fails is recoverable and a caller that blocks for ever is not.
 #
-# Spends nothing, needs no docker.
+# Spends nothing, needs no docker. Uses Python's fcntl on macOS and Linux.
 set -u
 
 usage() {
@@ -78,6 +79,46 @@ done
 
 note() { if [ "$QUIET" = "0" ]; then printf 'lock.sh: %s\n' "$*" >&2; fi }
 
+# Keep this file: unlinking it would let contenders lock different inodes.
+# Python takes flock on the shell's inherited open file description. The shell
+# retains it after Python exits and releases it by closing fd 9 (also on death).
+# Never hold this guard while polling a live owner.
+STARTED="$(date +%s)"
+DEADLINE=$((STARTED + TIMEOUT))
+guard() {
+  exec 9>>"${DIR%/}.guard" || exit 1
+  if ! python3 - "$DEADLINE" <<'PY'
+import fcntl
+import sys
+import time
+
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        break
+    except BlockingIOError:
+        remaining = float(sys.argv[1]) - time.time()
+        if remaining <= 0:
+            sys.exit(1)
+        time.sleep(min(0.05, remaining))
+PY
+  then
+    note "could not guard $DIR within ${TIMEOUT}s"
+    exit 1
+  fi
+}
+unguard() { exec 9>&-; }
+
+generation_of() {
+  if [ -f "$1/generation" ]; then
+    cat "$1/generation"
+  else
+    # Legacy locks have no nonce; distinguish them by device and inode.
+    printf 'legacy:'
+    stat -c '%d:%i' "$1" 2>/dev/null || stat -f '%d:%i' "$1" 2>/dev/null
+  fi
+}
+
 # Seconds since the lock directory was created, on either stat.
 age_of() {
   MTIME="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '')"
@@ -92,6 +133,7 @@ owner_of() { cat "$1/pid" 2>/dev/null || printf ''; }
 # True when this lock may be taken from whoever left it: a dead owner, or no
 # owner recorded at all and older than the stale window.
 stealable() {
+  GENERATION="$(generation_of "$1")"
   HELD_BY="$(owner_of "$1")"
   case "$HELD_BY" in
     ''|*[!0-9]*)
@@ -106,9 +148,22 @@ stealable() {
   return 0
 }
 
+# Only called while guarded, and fenced to the generation just inspected.
+remove_lock() {
+  if [ "$(generation_of "$1")" != "$GENERATION" ]; then return 1; fi
+  rm -f -- "$1/pid" "$1/label" "$1/generation" 2>/dev/null || return 1
+  rmdir "$1" 2>/dev/null
+}
+
 steal() {
-  rm -f -- "$1/pid" "$1/label" 2>/dev/null || true
-  rmdir "$1" 2>/dev/null || true
+  guard
+  REMOVED=1
+  if [ "$(generation_of "$1")" = "$GENERATION" ] && stealable "$1"; then
+    remove_lock "$1"
+    REMOVED=$?
+  fi
+  unguard
+  return "$REMOVED"
 }
 
 case "$MODE" in
@@ -127,28 +182,28 @@ case "$MODE" in
         note "the lane this was acquiring for (pid $OWNER) is gone — not taking $DIR"
         exit 1
       fi
+      guard
       if mkdir "$DIR" 2>/dev/null; then
-        printf '%s\n' "$OWNER" > "$DIR/pid"
-        if [ -n "$LABEL" ]; then printf '%s\n' "$LABEL" > "$DIR/label"; fi
-        # Settle: a process that stole this lock in the same instant would have
-        # replaced the directory, and its pid — not ours — is what is in there.
-        sleep 1
-        if [ "$(owner_of "$DIR")" != "$OWNER" ]; then
-          note "$DIR was taken by pid $(owner_of "$DIR") while we were claiming it — waiting"
-          continue
+        GENERATION="$OWNER-$$-$RANDOM-$RANDOM"
+        printf '%s\n' "$GENERATION" > "$DIR/generation" || exit 1
+        if ! printf '%s\n' "$OWNER" > "$DIR/pid" ||
+           { [ -n "$LABEL" ] && ! printf '%s\n' "$LABEL" > "$DIR/label"; }; then
+          remove_lock "$DIR"
+          exit 1
         fi
         if kill -0 "$OWNER" 2>/dev/null; then exit 0; fi
         note "the lane this was acquiring for (pid $OWNER) died as it took $DIR — releasing it"
-        steal "$DIR"
+        remove_lock "$DIR"
         exit 1
       fi
-      if stealable "$DIR"; then steal "$DIR"; continue; fi
+      unguard
+      if stealable "$DIR" && steal "$DIR"; then continue; fi
+      WAITED=$(( $(date +%s) - STARTED ))
       if [ "$WAITED" -ge "$TIMEOUT" ]; then
         note "$DIR is still held by pid $(owner_of "$DIR") after ${WAITED}s — giving up"
         exit 1
       fi
       sleep "$POLL"
-      WAITED=$((WAITED + POLL))
     done ;;
 
   release)
@@ -156,19 +211,19 @@ case "$MODE" in
       ''|*[!0-9]*) echo "lock.sh: release needs --owner <pid>" >&2; exit 2 ;;
     esac
     if [ ! -d "$DIR" ]; then exit 0; fi
+    guard
+    GENERATION="$(generation_of "$DIR")"
     HELD_BY="$(owner_of "$DIR")"
     if [ "$HELD_BY" != "$OWNER" ]; then
       note "$DIR is held by '${HELD_BY:-nobody}', not $OWNER — leaving it alone"
       exit 0
     fi
-    rm -f -- "$DIR/pid" "$DIR/label" 2>/dev/null || true
-    rmdir "$DIR" 2>/dev/null || true
+    remove_lock "$DIR"
     exit 0 ;;
 
   reconcile)
     if [ ! -d "$DIR" ]; then echo "no lock at $DIR"; exit 0; fi
-    if stealable "$DIR"; then
-      steal "$DIR"
+    if stealable "$DIR" && steal "$DIR"; then
       echo "cleared the stale lock at $DIR"
       exit 0
     fi
