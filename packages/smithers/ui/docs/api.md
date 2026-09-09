@@ -464,10 +464,26 @@ const vaultCss: string
 `links` and `graph` are optional bulk reads.
 
 `AutosaveState` is `"clean" | "dirty" | "saving" | "saved" | "conflict"`, and
-`AutosaveSnapshot.failure` carries an `AutosaveFailure` whose
-`AutosaveFailureCode` is `"read-failed"` or `"write-failed"`. Reporting
-`mtimeMs` from `save` advances the conflict baseline; a writer that cannot
-report one is safe, just more conservative about declaring conflicts.
+`AutosaveSnapshot.failure` and readonly `UseAutosaveDocResult.failure` expose
+`AutosaveFailure` (`code`, `cause`). `AutosaveFailureCode` is `"read-failed"`,
+`"write-failed"`, or `"conflict"` (a refused conditional commit).
+
+`save(value, expected)` receives the `AutosaveRevision` captured by
+`readExternal`. The backend must atomically compare its content and revision
+and write only on a match. Return `AutosaveSaveResult`: `{ mtimeMs? }` or
+`{ status: "conflict", cause? }`. A successful writer may resolve `void`.
+Reporting `mtimeMs` advances the conflict baseline. Without `readExternal`,
+`expected` is undefined and the writer provides its own concurrency control.
+
+`useAutosaveDoc` retains unsaved machines by `resetKey` across document switches
+and unmounts. Use a stable, unique document key to reopen a retained draft;
+omitting it gives the hook a private identity that cannot be reopened after
+unmount. An optional stable `owner` object scopes keys to a vault or session;
+keep it outside the component to recover drafts after remount. The default
+owner is shared by browser hooks in this module. Server renders use private
+owners. Retention is in memory, not across a page reload. Retired writes keep
+retrying; conflicts and read failures wait for reopening and `saveNow()` or `discardExternal()`. Only clean or saved retired
+machines are disposed.
 
 `KnowledgeGraph` is not here. It ships from
 [`@smthrs/ui/adapters/knowledge-graph`](#knowledge-graph).

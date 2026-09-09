@@ -690,6 +690,8 @@ export {
   type AutosaveDocOptions,
   type AutosaveFailure,
   type AutosaveFailureCode,
+  type AutosaveRevision,
+  type AutosaveSaveResult,
   type AutosaveSnapshot,
   type AutosaveState,
 } from "./vault/autosaveMachine";

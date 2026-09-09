@@ -92,6 +92,7 @@ state (`AutosaveSnapshot.failure`), as `AutosaveFailure = { code, cause }`.
 
 | Code           | State      | Meaning                                                                                                       |
 | -------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
+| `conflict` | `conflict` | The backend refused the conditional write because the checked revision changed. |
 | `read-failed`  | `conflict` | `readExternal` threw. The machine fails closed, because a file it cannot read is a file it cannot safely overwrite. |
 | `write-failed` | `dirty`    | `save` rejected. The debounce retries, so the document is not lost, but nothing was persisted.                 |
 
@@ -100,6 +101,22 @@ identical. A `conflict` with no failure is a real concurrent edit: someone else
 changed the file. A `conflict` carrying `read-failed` is an inspection error. A
 `dirty` carrying `write-failed` is a document whose write was attempted and
 rejected, not one the user has simply not finished editing.
+
+The hook exposes the same readonly `failure` and original `cause`. A successful
+retry clears it. Both ordinary saves and `discardExternal()` pass the captured
+`AutosaveRevision` to `save(value, expected)`. The host must atomically compare
+content and revision and write, returning `{ status: "conflict", cause? }`
+without writing on mismatch. `discardExternal()` authorizes replacing the
+version just read, and still refuses an unreadable or subsequently changed
+version. The UI library cannot enforce atomicity inside a host callback.
+
+Hook retirement retains the document's text, failure, writer and scheduled
+retry until its snapshot is clean or saved. Reopening the same `resetKey` in
+the same `owner` recovers that machine. A stable owner object isolates keys
+between vaults; the default owner is module-wide in the browser. Server
+renders use private owners. Unkeyed hooks still flush and retry after unmount,
+but require a stable key to reopen unresolved conflicts.
+Retained drafts are memory-only and do not survive a process or page restart.
 
 ## Resource limits
 

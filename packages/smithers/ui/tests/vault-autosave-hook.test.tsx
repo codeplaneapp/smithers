@@ -330,3 +330,236 @@ describe("useAutosaveDoc", () => {
     expect(saved).toEqual(["strict draft"]);
   });
 });
+
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (cause: unknown) => void;
+  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+function scheduler() {
+  const pending = new Set<() => void>();
+  return {
+    pending,
+    schedule(fn: () => void) { pending.add(fn); return () => { pending.delete(fn); }; },
+    run() { const batch = [...pending]; pending.clear(); for (const fn of batch) fn(); },
+  };
+}
+
+describe("retired autosave drafts", () => {
+  for (const exit of ["switch", "unmount"] as const) {
+    for (const state of ["dirty", "saving", "conflict", "read-failed", "write-failed", "commit-conflict"] as const) {
+      test(`${exit} retains and recovers a ${state} draft`, async () => {
+        const key = `${exit}:${state}`;
+        const timer = scheduler();
+        const flight = deferred();
+        const cause = new Error(state);
+        let mode: string = state;
+        let disk = "original a";
+        let api!: UseAutosaveDocResult;
+        let saving: Promise<void> | undefined;
+        function Probe({ id }: { id: string }) {
+          api = useAutosaveDoc({
+            resetKey: id,
+            initialValue: id === key ? disk : "original b",
+            initialMtimeMs: 1,
+            schedule: timer.schedule,
+            readExternal: async () => {
+              if (id !== key) return { content: "original b", mtimeMs: 1 };
+              if (mode === "read-failed") throw cause;
+              return { content: mode === "conflict" ? "external edit" : disk, mtimeMs: 1 };
+            },
+            save: async (value, expected) => {
+              expect(expected).toEqual({ content: disk, mtimeMs: 1 });
+              if (id !== key) throw new Error("outgoing draft used the next document's writer");
+              if (mode === "saving") await flight.promise;
+              if (mode === "commit-conflict") return { status: "conflict", cause };
+              if (mode === "dirty" || mode === "write-failed") throw cause;
+              disk = value;
+              return { mtimeMs: 2 };
+            },
+          });
+          return null;
+        }
+        container = document.createElement("div");
+        document.body.appendChild(container);
+        root = createRoot(container);
+        await act(async () => root!.render(<Probe id={key} />));
+        await act(async () => api.setValue("retained draft"));
+        if (state === "saving") {
+          await act(async () => { saving = api.saveNow(); });
+          expect(api.state).toBe("saving");
+          await act(async () => api.setValue("latest retained draft"));
+        } else if (state !== "dirty") {
+          await act(async () => api.saveNow());
+        }
+        if (exit === "switch") {
+          await act(async () => root!.render(<Probe id={`${key}:b`} />));
+        } else {
+          await act(async () => root!.unmount());
+          root = undefined;
+        }
+        if (state === "saving") {
+          await act(async () => { flight.reject(cause); await saving; });
+        }
+        if (state === "dirty" || state === "write-failed" || state === "saving") {
+          expect(timer.pending.size).toBe(1);
+        }
+        if (exit === "unmount") root = createRoot(container);
+        await act(async () => root!.render(<Probe id={key} />));
+        expect(api.value).toBe(state === "saving" ? "latest retained draft" : "retained draft");
+        expect(disk).toBe("original a");
+        if (state === "commit-conflict") expect(api.failure).toEqual({ code: "conflict", cause });
+        if (state === "read-failed") expect(api.failure).toEqual({ code: "read-failed", cause });
+        if (state === "dirty" || state === "write-failed" || state === "saving") {
+          expect(api.failure).toEqual({ code: "write-failed", cause });
+        }
+        mode = "healthy";
+        await act(async () => {
+          if (state === "conflict") await api.discardExternal();
+          else await api.saveNow();
+        });
+        expect(disk).toBe(state === "saving" ? "latest retained draft" : "retained draft");
+        expect(api.state).toBe("saved");
+        expect(api.failure).toBeUndefined();
+      });
+    }
+  }
+
+  test("exposes the original write failure through the hook", async () => {
+    let api!: UseAutosaveDocResult;
+    const cause = new Error("disk full");
+    let fails = true;
+    function Probe() {
+      api = useAutosaveDoc({ initialValue: "initial", schedule: () => () => {},
+        save: async () => { if (fails) throw cause; } });
+      return null;
+    }
+    container = document.createElement("div");
+    root = createRoot(container);
+    await act(async () => root!.render(<Probe />));
+    await act(async () => { api.setValue("draft"); await api.saveNow(); });
+    expect(api.failure).toEqual({ code: "write-failed", cause });
+    fails = false;
+    await act(async () => api.saveNow());
+    expect(api.failure).toBeUndefined();
+  });
+});
+
+for (const exit of ["switch", "unmount"] as const) {
+  test(`${exit} retries and persists in the background without reopening`, async () => {
+    const timer = scheduler();
+    let disk = "original";
+    let calls = 0;
+    let api!: UseAutosaveDocResult;
+    function Probe({ id }: { id: string }) {
+      api = useAutosaveDoc({
+        resetKey: id, initialValue: disk, schedule: timer.schedule,
+        save: async (value) => {
+          if (++calls === 1) throw new Error("temporarily offline");
+          disk = value;
+        },
+      });
+      return null;
+    }
+    container = document.createElement("div");
+    root = createRoot(container);
+    const key = `background:${exit}`;
+    await act(async () => root!.render(<Probe id={key} />));
+    await act(async () => api.setValue("background draft"));
+    await act(async () => {
+      if (exit === "switch") root!.render(<Probe id={`${key}:b`} />);
+      else { root!.unmount(); root = undefined; }
+    });
+    expect(timer.pending.size).toBe(1);
+    await act(async () => timer.run());
+    expect(disk).toBe("background draft");
+    expect(calls).toBe(2);
+    expect(timer.pending.size).toBe(0);
+    if (!root) root = createRoot(container);
+    await act(async () => root!.render(<Probe id={key} />));
+    expect(api.value).toBe("background draft");
+    expect(api.state).toBe("clean");
+  });
+}
+
+for (const exit of ["switch", "unmount"] as const) {
+  test(`${exit} finishes a deferred write and persists edits made during it`, async () => {
+    const timer = scheduler();
+    const flight = deferred();
+    const writes: string[] = [];
+    let api!: UseAutosaveDocResult;
+    let saving!: Promise<void>;
+    const key = `deferred-success:${exit}`;
+    function Probe({ id }: { id: string }) {
+      api = useAutosaveDoc({ resetKey: id, initialValue: "original", schedule: timer.schedule,
+        save: async (value) => {
+          expect(id).toBe(key);
+          if (writes.length === 0) await flight.promise;
+          writes.push(value);
+        } });
+      return null;
+    }
+    container = document.createElement("div");
+    root = createRoot(container);
+    await act(async () => root!.render(<Probe id={key} />));
+    await act(async () => { api.setValue("first draft"); saving = api.saveNow(); });
+    await act(async () => api.setValue("latest draft"));
+    await act(async () => {
+      if (exit === "switch") root!.render(<Probe id={`${key}:b`} />);
+      else { root!.unmount(); root = undefined; }
+    });
+    await act(async () => { flight.resolve(); await saving; });
+    expect(writes).toEqual(["first draft", "latest draft"]);
+    expect(timer.pending.size).toBe(0);
+  });
+}
+
+test("stable owners isolate identical document keys and recover after remount", async () => {
+  const owners = [{}, {}];
+  const writes: string[][] = [[], []];
+  let fails = true;
+  let api!: UseAutosaveDocResult;
+  function Probe({ vault }: { vault: number }) {
+    api = useAutosaveDoc({ owner: owners[vault], resetKey: "same path", initialValue: `vault ${vault}`,
+      schedule: () => () => {}, save: async (value) => {
+        if (fails) throw new Error("offline");
+        writes[vault]!.push(value);
+      } });
+    return null;
+  }
+  container = document.createElement("div");
+  root = createRoot(container);
+  await act(async () => root!.render(<Probe vault={0} />));
+  await act(async () => api.setValue("draft 0"));
+  await act(async () => root!.render(<Probe vault={1} />));
+  expect(api.value).toBe("vault 1");
+  await act(async () => api.setValue("draft 1"));
+  await act(async () => root!.unmount());
+  root = createRoot(container);
+  await act(async () => root!.render(<Probe vault={0} />));
+  expect(api.value).toBe("draft 0");
+  fails = false;
+  await act(async () => api.saveNow());
+  await act(async () => root!.render(<Probe vault={1} />));
+  expect(api.value).toBe("draft 1");
+  await act(async () => api.saveNow());
+  expect(writes).toEqual([["draft 0"], ["draft 1"]]);
+});
+
+test("server renders do not share document state between requests", async () => {
+  const { renderToString } = await import("react-dom/server");
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window")!;
+  function Probe({ initialValue }: { initialValue: string }) {
+    return useAutosaveDoc({ resetKey: "server document", initialValue, save: async () => {} }).value;
+  }
+  // Simulate the server without disturbing the test DOM outside this render.
+  Object.defineProperty(globalThis, "window", { configurable: true, value: undefined });
+  try {
+    expect(renderToString(<Probe initialValue="first request" />)).toBe("first request");
+    expect(renderToString(<Probe initialValue="second request" />)).toBe("second request");
+  } finally {
+    Object.defineProperty(globalThis, "window", descriptor);
+  }
+});

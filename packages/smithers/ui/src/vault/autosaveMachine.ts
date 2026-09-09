@@ -7,17 +7,18 @@
 export type AutosaveState = "clean" | "dirty" | "saving" | "saved" | "conflict";
 
 /**
- * Why the last attempt did not land. Both codes are stable strings a caller may
- * branch on; neither is a user-facing message.
+ * Why the last attempt did not land. The codes are stable strings a caller may
+ * branch on; none is a user-facing message.
  *
  * - `read-failed`: the external copy could not be inspected. The machine fails
  *   closed into `conflict`, because a file it cannot read is a file it cannot
  *   safely overwrite. This code is what distinguishes that from a real
- *   concurrent edit, which carries no failure.
+ *   concurrent edit detected by the read, which carries no failure.
+ * - `conflict`: the conditional write refused a changed external revision.
  * - `write-failed`: `save` rejected. The machine returns to `dirty` and the
  *   debounce retries, so the document is not lost, but nothing was persisted.
  */
-export type AutosaveFailureCode = "read-failed" | "write-failed";
+export type AutosaveFailureCode = "read-failed" | "write-failed" | "conflict";
 
 /** The last failure, with the original rejection retained as `cause`. */
 export type AutosaveFailure = {
@@ -38,21 +39,34 @@ export type AutosaveSnapshot = {
   readonly failure: AutosaveFailure | undefined;
 };
 
+/** The exact external revision a conditional writer must compare atomically. */
+export type AutosaveRevision = {
+  readonly content: string;
+  readonly mtimeMs?: number;
+};
+
+export type AutosaveSaveResult =
+  | { readonly status?: "saved"; readonly mtimeMs?: number }
+  | { readonly status: "conflict"; readonly cause?: unknown };
+
 export type AutosaveDocOptions = {
   /** Document text at load time. */
   initialValue: string;
   /** File mtime at load time; the conflict-check baseline. */
   initialMtimeMs?: number;
   /**
-   * Persist the current text; resolves with the new mtime when known.
+   * Persist the text only if the external copy still matches `expected`.
+   * The backend MUST compare content and revision and write in one atomic
+   * transaction or under a lock shared by all writers. On mismatch, leave the
+   * external copy unchanged and return `{ status: "conflict", cause? }`.
+   * A second read without an atomic commit does not satisfy this contract.
    *
-   * Reporting `mtimeMs` is what advances the conflict baseline. A writer that
-   * resolves `void` leaves the baseline at the last mtime the machine knows
-   * about, which makes conflict detection strictly MORE conservative (an
-   * unchanged baseline can only over-report a conflict, never miss one), so a
-   * writer that cannot report an mtime is safe, just noisier.
+   * `expected` is the exact readExternal result, including for discardExternal.
+   * Without a configured reader it is undefined; the writer must provide its
+   * own concurrency control in that mode. Reporting mtimeMs advances the
+   * baseline; resolving void leaves it unchanged.
    */
-  save: (value: string) => Promise<{ mtimeMs?: number } | void>;
+  save: (value: string, expected: AutosaveRevision | undefined) => Promise<AutosaveSaveResult | void>;
   /**
    * Read the on-disk copy for conflict detection. The save is refused, and the
    * machine lands in `conflict` instead of overwriting someone else's edit,
@@ -71,7 +85,7 @@ export type AutosaveDocOptions = {
    * machine cannot inspect is one it cannot safely overwrite, reported as
    * `conflict` carrying a `read-failed` {@link AutosaveFailure}.
    */
-  readExternal?: () => Promise<{ content: string; mtimeMs?: number } | undefined>;
+  readExternal?: () => Promise<AutosaveRevision | undefined>;
   /** Debounce window for edit-triggered saves (default 800ms). */
   debounceMs?: number;
   /** Injectable scheduler (returns a cancel fn); defaults to setTimeout. */
@@ -96,7 +110,8 @@ export type AutosaveDoc = {
   saveNow(): Promise<void>;
   /**
    * Resolve a conflict by discarding the external (on-disk) version:
-   * re-baselines the mtime to the current file and saves the local text.
+   * reads the current revision and conditionally saves the local text over it.
+   * A failed read or another write after that read still refuses the save.
    */
   discardExternal(): Promise<void>;
   dispose(): void;
@@ -177,20 +192,24 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
    * {@link AutosaveDocOptions.readExternal} for why each half is required and
    * what happens when a baseline is unavailable.
    */
-  async function detectConflict(): Promise<AutosaveFailure | boolean> {
-    if (!options.readExternal) return false;
-    let external: { content: string; mtimeMs?: number } | undefined;
+  async function detectConflict(force: boolean): Promise<{
+    external?: AutosaveRevision;
+    conflict: AutosaveFailure | boolean;
+  }> {
+    if (!options.readExternal) return { conflict: false };
+    let external: AutosaveRevision | undefined;
     try {
-      external = await options.readExternal();
+      const read = await options.readExternal();
+      external = read && { ...read };
     } catch (cause) {
       // Fail closed: an unreadable external copy cannot safely be overwritten.
       // The code is what tells this apart from a real concurrent edit.
-      return { code: "read-failed", cause };
+      return { conflict: { code: "read-failed", cause } };
     }
     // `undefined` means no reader is currently configured (the React binding
     // keeps a dynamic callback proxy installed so later props are observed).
-    if (!external) return false;
-    if (external.content === persistedContent) return false;
+    if (!external) return { conflict: false };
+    if (force || external.content === persistedContent) return { external, conflict: false };
     const externalMtime = external.mtimeMs;
     if (
       externalMtime === undefined ||
@@ -199,9 +218,9 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       !Number.isFinite(mtimeMs)
     ) {
       // No usable baseline: the content comparison stands alone.
-      return true;
+      return { external, conflict: true };
     }
-    return externalMtime >= mtimeMs;
+    return { external, conflict: externalMtime >= mtimeMs };
   }
 
   async function saveNow(force = false): Promise<void> {
@@ -223,7 +242,7 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       finishInflight = resolve;
     });
     try {
-      const conflict = force ? false : await detectConflict();
+      const { conflict, external } = await detectConflict(force);
       if (conflict) {
         if (!disposed) emit("conflict", conflict === true ? undefined : conflict);
         return;
@@ -231,8 +250,12 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       if (disposed) return;
       const savingValue = value;
       emit("saving");
-      const result = await options.save(savingValue);
+      const result = await options.save(savingValue, external);
       if (disposed) return;
+      if (result && result.status === "conflict") {
+        emit("conflict", { code: "conflict", cause: result.cause });
+        return;
+      }
       persistedContent = savingValue;
       mtimeMs = result?.mtimeMs ?? mtimeMs;
       // Edits during the flight are not covered by this save: stay dirty.
@@ -265,23 +288,13 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       scheduleFlush();
       emit("dirty");
     },
-    // Wrapped, never handed out raw: the implementation's `force` parameter is
-    // the deliberate-overwrite path and the public type grants no such
-    // capability. A JS caller reaching `doc.saveNow(true)` would skip conflict
-    // detection entirely and destroy another writer's edit.
+    // Only discardExternal may authorize replacing the version just read.
+    // Keep force private so a JS caller cannot gain that capability by passing
+    // an undocumented argument to saveNow.
     saveNow: () => saveNow(false),
     async discardExternal() {
       if (disposed) return;
       if (inflightDone) await inflightDone;
-      if (options.readExternal) {
-        try {
-          const external = await options.readExternal();
-          mtimeMs = external?.mtimeMs ?? mtimeMs;
-        } catch {
-          // Force-overwrite is explicit, so an unavailable baseline is okay.
-        }
-      }
-      emit("dirty");
       await saveNow(true);
     },
     dispose() {
