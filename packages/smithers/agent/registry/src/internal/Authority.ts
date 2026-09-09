@@ -6,7 +6,7 @@
  *
  * @since 0.1.0
  */
-import type { EffectTier } from "../Descriptor.ts"
+import type { EffectDeclaration, EffectTier } from "../Descriptor.ts"
 
 const tierRank: Record<EffectTier, number> = {
   sealed: 0,
@@ -26,24 +26,33 @@ export const maxTier = (left: EffectTier, right: EffectTier): EffectTier =>
   tierRank[left] >= tierRank[right] ? left : right
 
 /**
+ * The one projection that cannot understate authority discovery could not
+ * read: wildcard reads and writes, an incomplete effect set, a serialized
+ * conflict policy, and an irreversible tier.
+ *
+ * @category authority
+ * @since 1.0.0-rc.0
+ */
+export const conservativeEffects: EffectDeclaration = {
+  reads: ["**"],
+  writes: ["**"],
+  mode: "expected",
+  onConflict: "serialize",
+  tier: "irreversible"
+}
+
+/**
  * Projects the README's conservative authority for a non-empty delegate list
  * whose authority discovery cannot independently resolve.
  *
  * @category authority
  * @since 1.0.0-rc.0
  */
-export const unprojectableDelegation = (): {
+export const unprojectableDelegation = (): EffectDeclaration & {
   readonly capabilities: ReadonlyArray<string>
-  readonly reads: ReadonlyArray<string>
-  readonly writes: ReadonlyArray<string>
-  readonly mode: "expected"
-  readonly tier: "irreversible"
 } => ({
   capabilities: ["*"],
-  reads: ["**"],
-  writes: ["**"],
-  mode: "expected",
-  tier: "irreversible"
+  ...conservativeEffects
 })
 
 const tierForCapability = (capability: string): EffectTier => {
@@ -104,3 +113,115 @@ export const inferEffectTier = (capabilities: ReadonlyArray<string>): EffectTier
     (tier, capability) => maxTier(tier, tierForCapability(capability)),
     "sealed"
   )
+
+/**
+ * A declared `effects` object as a body decoder reads it, before any
+ * conservative widening. An absent member is `undefined`. A member whose
+ * spelling discovery cannot project is `"unreadable"`, which no valid mode,
+ * conflict policy, or tier matches, so it takes the same branch as an invalid
+ * literal.
+ *
+ * @category authority
+ * @since 1.0.0-rc.0
+ */
+export type DeclaredEffects = {
+  readonly reads: ReadonlyArray<string> | "unreadable" | undefined
+  readonly writes: ReadonlyArray<string> | "unreadable" | undefined
+  readonly mode: string | undefined
+  readonly onConflict: string | undefined
+  readonly tier: string | undefined
+}
+
+/**
+ * What a projection found wrong with a declaration. Each body kind spells
+ * these in its own warning vocabulary.
+ *
+ * @category authority
+ * @since 1.0.0-rc.0
+ */
+export type EffectProblem =
+  | { readonly _tag: "unreadableDeclaration" }
+  | { readonly _tag: "unreadableMember"; readonly member: "reads" | "writes" }
+  | { readonly _tag: "invalidMode" }
+  | { readonly _tag: "invalidOnConflict" }
+  | { readonly _tag: "invalidTier" }
+  | { readonly _tag: "underClassifiedTier"; readonly declared: EffectTier; readonly projected: EffectTier }
+
+/**
+ * Projects one declaration into the effects a descriptor carries, and the
+ * problems the caller reports. Markdown and module bodies decode different
+ * syntax into the same input, so the rule that widens a declaration is decided
+ * here once rather than per body kind.
+ *
+ * Wildcard capabilities force the whole conservative projection, whether the
+ * flow declared them or discovery projected them because it could not read the
+ * authority. An omitted `reads` or `writes` in a readable declaration is the
+ * empty set; an unreadable one is the wildcard.
+ *
+ * @category authority
+ * @since 1.0.0-rc.0
+ */
+export const projectEffects = (input: {
+  readonly capabilities: ReadonlyArray<string>
+  readonly declaration: DeclaredEffects | "unreadable" | undefined
+}): { readonly effects: EffectDeclaration; readonly problems: ReadonlyArray<EffectProblem> } => {
+  const problems: Array<EffectProblem> = []
+  const declaration = input.declaration === "unreadable" ? undefined : input.declaration
+  let conservative = input.capabilities.includes("*") || input.declaration === "unreadable"
+  if (input.declaration === "unreadable") {
+    problems.push({ _tag: "unreadableDeclaration" })
+  }
+
+  const paths = (member: "reads" | "writes"): ReadonlyArray<string> => {
+    const declared = declaration?.[member]
+    if (declared === undefined) return []
+    if (declared === "unreadable") {
+      conservative = true
+      problems.push({ _tag: "unreadableMember", member })
+      return conservativeEffects[member]
+    }
+    return declared
+  }
+  const reads = paths("reads")
+  const writes = paths("writes")
+
+  const inferred = inferEffectTier(input.capabilities)
+  let tier = inferred
+  const declaredTier = declaration?.tier
+  if (declaredTier === "sealed" || declaredTier === "compensable" || declaredTier === "irreversible") {
+    tier = maxTier(declaredTier, inferred)
+    if (tier !== declaredTier) {
+      problems.push({ _tag: "underClassifiedTier", declared: declaredTier, projected: tier })
+    }
+  } else if (declaredTier !== undefined) {
+    tier = "irreversible"
+    problems.push({ _tag: "invalidTier" })
+  }
+
+  const mode = declaration?.mode
+  if (mode !== undefined && mode !== "hermetic" && mode !== "expected") {
+    conservative = true
+    problems.push({ _tag: "invalidMode" })
+  }
+  const onConflict = declaration?.onConflict
+  if (
+    onConflict !== undefined &&
+    onConflict !== "serialize" &&
+    onConflict !== "lane" &&
+    onConflict !== "fail"
+  ) {
+    conservative = true
+    problems.push({ _tag: "invalidOnConflict" })
+  }
+
+  return {
+    effects: {
+      reads: conservative ? conservativeEffects.reads : reads,
+      writes: conservative ? conservativeEffects.writes : writes,
+      mode: conservative || mode === "expected" ? "expected" : "hermetic",
+      onConflict: onConflict === "lane" || onConflict === "fail" ? onConflict : conservativeEffects.onConflict,
+      tier: conservative ? conservativeEffects.tier : tier
+    },
+    problems
+  }
+}

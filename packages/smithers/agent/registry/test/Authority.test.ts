@@ -1,5 +1,10 @@
+import { Option } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Descriptor from "../src/Descriptor.ts"
+import * as Authority from "../src/internal/Authority.ts"
 import { inferEffectTier, maxTier } from "../src/internal/Authority.ts"
+import * as ModuleMetadata from "../src/internal/ModuleMetadata.ts"
+import * as MarkdownFlow from "../src/MarkdownFlow.ts"
 
 describe("Authority", () => {
   it("returns the more conservative tier and keeps the left value when ranks tie", () => {
@@ -72,5 +77,115 @@ describe("Authority", () => {
     expect(inferEffectTier(["Read", "fs:write:src/**"])).toBe("compensable")
     expect(inferEffectTier(["fs:write:src/**", "Read"])).toBe("compensable")
     expect(inferEffectTier(["Read", "fs:write:src/**", "Write"])).toBe("irreversible")
+  })
+})
+
+describe("shared effects projection", () => {
+  const markdownEffects = (frontmatter: ReadonlyArray<string>) =>
+    Option.getOrThrow(
+      MarkdownFlow.fromMarkdown({
+        text: ["---", "description: Review", ...frontmatter, "---", "body"].join("\n"),
+        path: "/flows/review/SKILL.md",
+        baseDirectory: "/flows/review",
+        naming: "frontmatter",
+        name: Option.some("review"),
+        dirBasename: "review",
+        provenance: new Descriptor.Provenance({ source: "test", root: "/flows" })
+      }).descriptor
+    ).effects
+
+  const moduleEffects = (members: ReadonlyArray<string>) =>
+    ModuleMetadata.parse(
+      ["export default Flow.make({", "  description: \"Review\",", ...members, "})"].join("\n")
+    ).effects
+
+  it.each([
+    [
+      "a bounded envelope every member declares",
+      [
+        "capabilities: [fs:write:src]",
+        "effects:",
+        "  reads: [src]",
+        "  writes: [src/out]",
+        "  mode: hermetic",
+        "  onConflict: fail",
+        "  tier: compensable"
+      ],
+      [
+        "  capabilities: [\"fs:write:src\"],",
+        "  effects: { reads: [\"src\"], writes: [\"src/out\"], mode: \"hermetic\", onConflict: \"fail\", tier: \"compensable\" }"
+      ],
+      { reads: ["src"], writes: ["src/out"], mode: "hermetic", onConflict: "fail", tier: "compensable" }
+    ],
+    [
+      "a declaration that omits reads and writes under bounded authority",
+      ["capabilities: [fs:read]", "effects:", "  tier: sealed"],
+      ["  capabilities: [\"fs:read\"],", "  effects: { tier: \"sealed\" }"],
+      { reads: [], writes: [], mode: "hermetic", onConflict: "serialize", tier: "sealed" }
+    ],
+    [
+      "declared wildcard capabilities under a narrow envelope",
+      [
+        "capabilities: ['*']",
+        "effects:",
+        "  reads: []",
+        "  writes: []",
+        "  mode: hermetic",
+        "  onConflict: serialize",
+        "  tier: sealed"
+      ],
+      [
+        "  capabilities: [\"*\"],",
+        "  effects: { reads: [], writes: [], mode: \"hermetic\", onConflict: \"serialize\", tier: \"sealed\" }"
+      ],
+      Authority.conservativeEffects
+    ],
+    [
+      "a capability list discovery cannot read",
+      [
+        "capabilities:",
+        "  read: true",
+        "effects:",
+        "  reads: []",
+        "  writes: []",
+        "  mode: hermetic",
+        "  tier: sealed"
+      ],
+      ["  capabilities,", "  effects: { reads: [], writes: [], mode: \"hermetic\", tier: \"sealed\" }"],
+      Authority.conservativeEffects
+    ],
+    [
+      "a non-empty delegate list",
+      [
+        "flows: [dangerous/write]",
+        "capabilities: [fs:read]",
+        "effects:",
+        "  reads: []",
+        "  writes: []",
+        "  mode: hermetic",
+        "  tier: sealed"
+      ],
+      [
+        "  capabilities: [\"fs:read\"],",
+        "  flows: [\"dangerous/write\"],",
+        "  effects: { reads: [], writes: [], mode: \"hermetic\", tier: \"sealed\" }"
+      ],
+      Authority.conservativeEffects
+    ],
+    [
+      "an effects value that is not an object",
+      ["capabilities: [fs:read]", "effects: none"],
+      ["  capabilities: [\"fs:read\"],", "  effects: baseEffects"],
+      Authority.conservativeEffects
+    ],
+    [
+      "a conflict policy the schema does not allow",
+      ["capabilities: [fs:read]", "effects:", "  reads: []", "  writes: []", "  onConflict: whenever"],
+      ["  capabilities: [\"fs:read\"],", "  effects: { reads: [], writes: [], onConflict: \"whenever\" }"],
+      Authority.conservativeEffects
+    ]
+  ])("projects %s the same way for markdown and module bodies", (_label, frontmatter, members, effects) => {
+    expect(markdownEffects(frontmatter)).toEqual(effects)
+    expect(moduleEffects(members)).toEqual(markdownEffects(frontmatter))
   })
 })

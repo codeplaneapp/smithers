@@ -23,7 +23,8 @@ import {
   SchemaRefMarkdownArgs,
   SchemaRefMarkdownOutput
 } from "./Descriptor.ts"
-import { inferEffectTier, maxTier, unprojectableDelegation } from "./internal/Authority.ts"
+import type { EffectProblem } from "./internal/Authority.ts"
+import { projectEffects, unprojectableDelegation } from "./internal/Authority.ts"
 import * as Frontmatter from "./internal/Frontmatter.ts"
 import * as Names from "./internal/Names.ts"
 
@@ -124,7 +125,7 @@ export const fromMarkdown = (options: FromMarkdownOptions): FromMarkdownResult =
   const delegation = flows.length === 0 ? undefined : unprojectableDelegation()
   const capabilities = deriveCapabilities(fields, delegation, options.path, warnings)
   const modelInvocable = deriveModelInvocable(fields, options.path, warnings)
-  const effects = deriveEffects(fields, capabilities, delegation, options.path, warnings)
+  const effects = deriveEffects(fields, capabilities, options.path, warnings)
   const placement = derivePlacement(fields, options.path, warnings)
   const budget = deriveBudget(fields, options.path, warnings)
   const model = typeof fields.model === "string" && fields.model.trim() !== ""
@@ -335,96 +336,87 @@ const deriveModelInvocable = (
   return true
 }
 
+const effectWarning = (problem: EffectProblem, path: string): DiscoveryWarning => {
+  switch (problem._tag) {
+    case "unreadableDeclaration":
+      return {
+        code: "invalid_effect_declaration",
+        path,
+        message: "Frontmatter effects must be an object; using conservative effects"
+      }
+    case "unreadableMember":
+      return {
+        code: "invalid_effect_declaration",
+        path,
+        message: `Frontmatter effects.${problem.member} must be a string array; using the conservative wildcard`
+      }
+    case "invalidMode":
+      return {
+        code: "invalid_effect_declaration",
+        path,
+        message: "Frontmatter effects.mode must be hermetic or expected; using expected"
+      }
+    case "invalidOnConflict":
+      return {
+        code: "invalid_effect_declaration",
+        path,
+        message: "Frontmatter effects.onConflict must be serialize, lane, or fail; using serialize"
+      }
+    case "invalidTier":
+      return {
+        code: "invalid_effect_tier",
+        path,
+        message: "Ignoring invalid effects.tier; using irreversible"
+      }
+    case "underClassifiedTier":
+      return {
+        code: "invalid_effect_tier",
+        path,
+        message: `Effect tier ${problem.declared} under-classifies declared authority; using ${problem.projected}`
+      }
+  }
+}
+
 const deriveEffects = (
   fields: Record<string, unknown>,
   capabilities: ReadonlyArray<string>,
-  delegation: ReturnType<typeof unprojectableDelegation> | undefined,
   path: string,
   warnings: Array<DiscoveryWarning>
 ): EffectDeclaration => {
-  const inferred = delegation?.tier ?? inferEffectTier(capabilities)
   const value = fields.effects
   const object = typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined
-  let conservative = delegation !== undefined || capabilities.includes("*")
-  if (value !== undefined && object === undefined) {
-    conservative = true
-    warnings.push({
-      code: "invalid_effect_declaration",
-      path,
-      message: "Frontmatter effects must be an object; using conservative effects"
-    })
-  }
-  const strings = (key: "reads" | "writes"): ReadonlyArray<string> => {
+  const paths = (key: "reads" | "writes"): ReadonlyArray<string> | "unreadable" | undefined => {
     const candidate = object?.[key]
-    if (candidate === undefined) {
-      return conservative ? ["**"] : []
-    }
-    if (Array.isArray(candidate) && candidate.every((item): item is string => typeof item === "string")) {
-      return candidate
-    }
-    conservative = true
-    warnings.push({
-      code: "invalid_effect_declaration",
-      path,
-      message: `Frontmatter effects.${key} must be a string array; using the conservative wildcard`
-    })
-    return ["**"]
+    if (candidate === undefined) return undefined
+    return Array.isArray(candidate) && candidate.every((item): item is string => typeof item === "string")
+      ? candidate
+      : "unreadable"
   }
-  const reads = strings("reads")
-  const writes = strings("writes")
-  const explicitTier = object?.tier
-  let tier = inferred
-  if (explicitTier === "sealed" || explicitTier === "compensable" || explicitTier === "irreversible") {
-    tier = maxTier(explicitTier, inferred)
-    if (tier !== explicitTier) {
-      warnings.push({
-        code: "invalid_effect_tier",
-        path,
-        message: `Effect tier ${explicitTier} under-classifies declared authority; using ${tier}`
-      })
-    }
-  } else if (explicitTier !== undefined) {
-    tier = "irreversible"
-    warnings.push({
-      code: "invalid_effect_tier",
-      path,
-      message: "Ignoring invalid effects.tier; using irreversible"
-    })
+  const literal = (key: "mode" | "onConflict" | "tier"): string | undefined => {
+    const candidate = object?.[key]
+    if (candidate === undefined) return undefined
+    return typeof candidate === "string" ? candidate : "unreadable"
   }
-  const mode = object?.mode
-  if (mode !== undefined && mode !== "hermetic" && mode !== "expected") {
-    conservative = true
-    warnings.push({
-      code: "invalid_effect_declaration",
-      path,
-      message: "Frontmatter effects.mode must be hermetic or expected; using expected"
-    })
+  const projection = projectEffects({
+    capabilities,
+    declaration: value === undefined
+      ? undefined
+      : object === undefined
+      ? "unreadable"
+      : {
+        reads: paths("reads"),
+        writes: paths("writes"),
+        mode: literal("mode"),
+        onConflict: literal("onConflict"),
+        tier: literal("tier")
+      }
+  })
+  for (const problem of projection.problems) {
+    warnings.push(effectWarning(problem, path))
   }
-  const onConflict = object?.onConflict
-  if (
-    onConflict !== undefined &&
-    onConflict !== "serialize" &&
-    onConflict !== "lane" &&
-    onConflict !== "fail"
-  ) {
-    conservative = true
-    warnings.push({
-      code: "invalid_effect_declaration",
-      path,
-      message: "Frontmatter effects.onConflict must be serialize, lane, or fail; using serialize"
-    })
-  }
-  return {
-    reads: delegation?.reads ?? (conservative ? ["**"] : reads),
-    writes: delegation?.writes ?? (conservative ? ["**"] : writes),
-    mode: delegation?.mode ?? (conservative || mode === "expected" ? "expected" : "hermetic"),
-    onConflict: onConflict === "lane" || onConflict === "fail"
-      ? onConflict
-      : "serialize",
-    tier: delegation?.tier ?? (conservative ? "irreversible" : tier)
-  }
+  return projection.effects
 }
 
 const derivePlacement = (

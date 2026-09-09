@@ -506,4 +506,64 @@ describe("ModuleMetadata", () => {
       "Effects tier must be a sealed, compensable, or irreversible string literal; using irreversible"
     ])
   })
+  it("projects declared wildcard capabilities as the conservative envelope", () => {
+    const metadata = ModuleMetadata.parse([
+      "export default Flow.make({",
+      "  description: \"Claims everything.\",",
+      "  capabilities: [\"*\"],",
+      "  effects: { reads: [], writes: [], mode: \"hermetic\", onConflict: \"serialize\", tier: \"sealed\" }",
+      "})"
+    ].join("\n"))
+
+    expect(metadata.effects).toEqual({
+      reads: ["**"],
+      writes: ["**"],
+      mode: "expected",
+      onConflict: "serialize",
+      tier: "irreversible"
+    })
+    expect(metadata.warnings).toContainEqual({
+      message: "Effect tier sealed under-classifies declared authority; using irreversible"
+    })
+  })
+
+  it("widens an unreadable reads member to the wildcard and names it", () => {
+    const metadata = ModuleMetadata.parse([
+      "export default Flow.make({",
+      "  description: \"Reads an imported list.\",",
+      "  capabilities: [\"fs:read:.\"],",
+      "  effects: { reads: sharedReads, writes: [] }",
+      "})"
+    ].join("\n"))
+
+    expect(metadata.effects).toEqual({
+      reads: ["**"],
+      writes: ["**"],
+      mode: "expected",
+      onConflict: "serialize",
+      tier: "irreversible"
+    })
+    expect(metadata.warnings).toContainEqual({
+      message: "Effects reads must be a string-literal array; using the conservative wildcard"
+    })
+  })
+
+  it("reads members an effects object leaves out as empty sets", () => {
+    const metadata = ModuleMetadata.parse([
+      "export default Flow.make({",
+      "  description: \"Declares only a tier.\",",
+      "  capabilities: [\"fs:read\"],",
+      "  effects: { tier: \"sealed\" }",
+      "})"
+    ].join("\n"))
+
+    expect(metadata.effects).toEqual({
+      reads: [],
+      writes: [],
+      mode: "hermetic",
+      onConflict: "serialize",
+      tier: "sealed"
+    })
+    expect(metadata.warnings).toEqual([])
+  })
 })

@@ -5,8 +5,8 @@
  * @since 0.1.0
  */
 import * as Option from "effect/Option"
-import type { EffectDeclaration, EffectTier, Placement } from "../Descriptor.ts"
-import { inferEffectTier, maxTier, unprojectableDelegation } from "./Authority.ts"
+import type { EffectDeclaration, Placement } from "../Descriptor.ts"
+import { conservativeEffects, projectEffects, unprojectableDelegation } from "./Authority.ts"
 
 /**
  * @since 0.1.0
@@ -496,62 +496,73 @@ const objectProperties = (
 
 const effectDeclaration = (
   source: string | undefined,
-  inferredTier: EffectTier,
-  warnings: Array<MetadataWarning>,
-  delegation: ReturnType<typeof unprojectableDelegation> | undefined
+  capabilities: ReadonlyArray<string>,
+  warnings: Array<MetadataWarning>
 ): EffectDeclaration => {
   const properties = objectProperties(source)
-  if (source !== undefined && properties === undefined) {
-    warnings.push({ message: "Effects must be a statically projectable object literal; using conservative effects" })
-  }
-  const reads = stringArray(properties?.values.get("reads"))
-  const writes = stringArray(properties?.values.get("writes"))
-  const tierSource = properties?.values.get("tier")
-  const explicitTier = stringLiteral(tierSource)
-  let tier = inferredTier
-  if (explicitTier === "sealed" || explicitTier === "compensable" || explicitTier === "irreversible") {
-    tier = maxTier(explicitTier, inferredTier)
-    if (tier !== explicitTier) {
-      warnings.push({
-        message: `Effect tier ${explicitTier} under-classifies declared authority; using ${tier}`
-      })
-    }
-  } else if (tierSource !== undefined) {
-    tier = "irreversible"
+  const unreadable = source !== undefined &&
+    (properties === undefined || properties.hasUnprojectableMembers)
+  if (unreadable) {
     warnings.push({
-      message: "Effects tier must be a sealed, compensable, or irreversible string literal; using irreversible"
+      message: properties === undefined
+        ? "Effects must be a statically projectable object literal; using conservative effects"
+        : "Effects contain an object spread or computed member; using conservative effects"
     })
   }
-  const mode = stringLiteral(properties?.values.get("mode"))
-  const onConflict = stringLiteral(properties?.values.get("onConflict"))
-  const invalidMode = properties?.values.has("mode") === true &&
-    mode !== "hermetic" &&
-    mode !== "expected"
-  const invalidConflict = properties?.values.has("onConflict") === true &&
-    onConflict !== "serialize" &&
-    onConflict !== "lane" &&
-    onConflict !== "fail"
-  const conservative = source !== undefined && (
-    properties === undefined ||
-    properties.hasUnprojectableMembers ||
-    reads === undefined ||
-    writes === undefined ||
-    invalidMode ||
-    invalidConflict
-  )
-  if (properties?.hasUnprojectableMembers === true) {
-    warnings.push({ message: "Effects contain an object spread or computed member; using conservative effects" })
+  const paths = (key: "reads" | "writes"): ReadonlyArray<string> | "unreadable" | undefined => {
+    if (properties?.values.has(key) !== true) return undefined
+    return stringArray(properties.values.get(key)) ?? "unreadable"
   }
-  if (invalidMode || invalidConflict) {
-    warnings.push({ message: "Effects mode and conflict policy must be string literals; using conservative effects" })
+  const literal = (key: "mode" | "onConflict" | "tier"): string | undefined => {
+    if (properties?.values.has(key) !== true) return undefined
+    return stringLiteral(properties.values.get(key)) ?? "unreadable"
   }
-  return {
-    reads: delegation?.reads ?? (conservative ? ["**"] : reads ?? []),
-    writes: delegation?.writes ?? (conservative ? ["**"] : writes ?? []),
-    mode: delegation?.mode ?? (conservative || mode === "expected" ? "expected" : "hermetic"),
-    onConflict: onConflict === "lane" || onConflict === "fail" ? onConflict : "serialize",
-    tier: delegation?.tier ?? (conservative ? "irreversible" : tier)
+  const projection = projectEffects({
+    capabilities,
+    declaration: source === undefined
+      ? undefined
+      : unreadable
+      ? "unreadable"
+      : {
+        reads: paths("reads"),
+        writes: paths("writes"),
+        mode: literal("mode"),
+        onConflict: literal("onConflict"),
+        tier: literal("tier")
+      }
+  })
+  let reportedPolicy = false
+  for (const problem of projection.problems) {
+    switch (problem._tag) {
+      case "unreadableDeclaration":
+        break
+      case "unreadableMember":
+        warnings.push({
+          message: `Effects ${problem.member} must be a string-literal array; using the conservative wildcard`
+        })
+        break
+      case "invalidMode":
+      case "invalidOnConflict":
+        if (!reportedPolicy) {
+          reportedPolicy = true
+          warnings.push({
+            message: "Effects mode and conflict policy must be string literals; using conservative effects"
+          })
+        }
+        break
+      case "invalidTier":
+        warnings.push({
+          message: "Effects tier must be a sealed, compensable, or irreversible string literal; using irreversible"
+        })
+        break
+      case "underClassifiedTier":
+        warnings.push({
+          message: `Effect tier ${problem.declared} under-classifies declared authority; using ${problem.projected}`
+        })
+        break
+    }
   }
+  return projection.effects
 }
 
 /**
@@ -573,13 +584,7 @@ export const parse = (source: string): Metadata => {
       model: Option.none(),
       flows: [],
       capabilities: ["*"],
-      effects: {
-        reads: ["**"],
-        writes: ["**"],
-        mode: "expected",
-        onConflict: "serialize",
-        tier: "irreversible"
-      },
+      effects: conservativeEffects,
       placement: placementFromSource(source),
       modelInvocable: true,
       declaresName: false,
@@ -617,13 +622,7 @@ export const parse = (source: string): Metadata => {
     ? delegation?.capabilities ?? ["*"]
     : literalCapabilities
 
-  const inferredTier = delegation?.tier ?? inferEffectTier(capabilities)
-  const effects = effectDeclaration(
-    properties.get("effects"),
-    inferredTier,
-    warnings,
-    delegation
-  )
+  const effects = effectDeclaration(properties.get("effects"), capabilities, warnings)
 
   const modelInvocableSource = properties.get("modelInvocable")
   const disableModelInvocationSource = properties.get("disableModelInvocation")
