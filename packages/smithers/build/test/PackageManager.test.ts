@@ -350,7 +350,7 @@ describe("PackageManager.storeRoot", () => {
       Effect.runPromise(
         Effect.gen(function*() {
           const manager = yield* PackageManager.makePnpm({
-            requirement: "11.21.0",
+            requirement: "9.15.0",
             projectRoot,
             executable,
             environment: process.env
@@ -404,29 +404,149 @@ describe("PackageManager.storeRoot", () => {
     })
   })
 
-  /**
-   * The default executable carries the Windows shim's extension.
-   *
-   * `pnpm` on Windows is `pnpm.cmd`. Node's spawn resolves an image path
-   * through `.exe` and never appends `PATHEXT`, so the bare name fails with
-   * `spawn pnpm ENOENT` before the manager runs at all.
-   */
-  it("names the pnpm shim Windows actually ships when the caller names none", async () => {
-    await withFixture("package-manager-windows-shim", async (root) => {
-      // No Windows host here, so the observation is the spawn failure itself:
-      // the error names the command line it could not start, which is the
-      // executable this manager chose.
-      const error = await Effect.runPromise(
-        PackageManager.makePnpm({ requirement: "11.21.0", projectRoot: root }).pipe(
-          Effect.flatMap((manager) => manager.version),
-          Effect.flip,
+  it.each([false, true])(
+    "refuses an unresolved Windows pnpm.cmd shim before spawning (shim present: %s)",
+    async (present) => {
+      await withFixture("package-manager-windows-shim", async (root) => {
+        if (present) await Fs.writeFile(NodePath.join(root, "pnpm.cmd"), "@echo unresolved shim\n")
+        const error = await Effect.runPromise(
+          PackageManager.makePnpm({
+            requirement: "11.21.0",
+            projectRoot: root,
+            environment: { Path: root }
+          }).pipe(
+            Effect.flatMap((manager) => manager.version),
+            Effect.flip,
+            Effect.provide(NodeServices.layer),
+            Effect.provide(windowsRuntimeLayer)
+          )
+        )
+        expect(error.code).toBe("environment_mismatch")
+        expect(error.message).toContain("pnpm.cmd")
+      })
+    }
+  )
+
+  it("resolves Windows pnpm.cmd to JavaScript and preserves literal arguments without a shell", async () => {
+    await withFixture("package-manager-windows & %PATH% ^", async (root) => {
+      const bin = NodePath.join(root, "bin & %PATH% ^")
+      const entry = NodePath.join(bin, "node_modules/pnpm/bin/pnpm.cjs")
+      await Fs.mkdir(NodePath.dirname(entry), { recursive: true })
+      await Fs.writeFile(NodePath.join(bin, "pnpm.cmd"), "@echo shim must never execute\n")
+      await Fs.writeFile(
+        entry,
+        `
+        require("node:fs").appendFileSync("calls", JSON.stringify(process.argv.slice(2)) + "\\n")
+        if (process.argv[2] === "--version") process.stdout.write("11.21.0\\n")
+      `
+      )
+      const manager = await Effect.runPromise(
+        PackageManager.makePnpm({
+          requirement: "11.21.0",
+          projectRoot: root,
+          environment: { Path: `${root}/absent;"${bin}"`, SystemRoot: process.env.SystemRoot }
+        }).pipe(
           Effect.provide(NodeServices.layer),
-          Effect.provide(windowsRuntimeLayer)
+          Effect.provide(Runtime.layerNoop("node", {
+            requirement: ">=22.19.0",
+            version: "24.9.0",
+            executable: process.execPath,
+            platform: { ...platform, os: "win32" }
+          }))
         )
       )
-      expect(error.code).toBe("command_failed")
-      expect(error.cause?.message).toContain("pnpm.cmd")
-      expect(error.cause?.code).toBe("ENOENT")
+      expect(await Effect.runPromise(manager.verify)).toBe("11.21.0")
+      await Effect.runPromise(manager.fetch)
+      await Effect.runPromise(manager.link)
+      const calls = (await Fs.readFile(NodePath.join(root, "calls"), "utf8")).trim().split("\n")
+        .map((line) => JSON.parse(line) as Array<string>)
+      expect(calls).toEqual([
+        ["--version"],
+        [
+          "fetch",
+          "--frozen-lockfile",
+          "--ignore-scripts",
+          "--reporter=append-only",
+          "--store-dir",
+          `${root}/.flows/store/pnpm`
+        ],
+        [
+          "install",
+          "--offline",
+          "--frozen-lockfile",
+          "--ignore-scripts",
+          "--reporter=append-only",
+          "--store-dir",
+          `${root}/.flows/store/pnpm`
+        ]
+      ])
+    })
+  })
+
+  it.each(["fetch", "link"] as const)("verifies before a direct public %s can mutate", async (operation) => {
+    await withFixture("package-manager-direct-verify", async (root) => {
+      const executable = NodePath.join(root, "pnpm.mjs")
+      await writeExecutable(
+        executable,
+        `
+        import { appendFileSync } from "node:fs"
+        appendFileSync("calls", process.argv[2] + "\\n")
+        if (process.argv[2] === "--version") process.stdout.write("1.0.0\\n")
+      `
+      )
+      const manager = await makePnpm(root, executable)
+      await expect(Effect.runPromise(manager[operation])).rejects.toMatchObject({ code: "environment_mismatch" })
+      expect(await Fs.readFile(NodePath.join(root, "calls"), "utf8")).toBe("--version\n")
+    })
+  })
+
+  it("memoizes manager probes and the npmrc read per service instance", async () => {
+    await withFixture("package-manager-cached", async (root) => {
+      const executable = NodePath.join(root, "pnpm.mjs")
+      await Fs.writeFile(NodePath.join(root, ".npmrc"), "registry=https://registry.example/\n")
+      await writeExecutable(
+        executable,
+        `
+        import { appendFileSync } from "node:fs"
+        appendFileSync("calls", process.argv[2] + "\\n")
+        if (process.argv[2] === "--version") process.stdout.write("11.21.0\\n")
+      `
+      )
+      const fs = await Effect.runPromise(FileSystem.FileSystem.pipe(Effect.provide(NodeServices.layer)))
+      let reads = 0
+      const layer = PackageManager.layerPnpm({
+        requirement: "11.21.0",
+        projectRoot: root,
+        executable,
+        environment: process.env
+      })
+      const use = Effect.gen(function*() {
+        const manager = yield* PackageManager.PackageManager
+        yield* Effect.all([manager.version, manager.verify], { concurrency: "unbounded" })
+        yield* manager.verify
+        yield* manager.fetch
+        yield* manager.verify
+        yield* manager.link
+      }).pipe(
+        Effect.provide(layer),
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          open: (path, options) =>
+            fs.open(path, options).pipe(Effect.tap(() =>
+              Effect.sync(() => {
+                reads += 1
+              })
+            ))
+        }),
+        Effect.provide(NodeServices.layer),
+        Effect.provide(runtimeLayer)
+      )
+      await Effect.runPromise(use)
+      expect.soft(reads).toBe(1)
+      expect.soft(await Fs.readFile(NodePath.join(root, "calls"), "utf8")).toBe("--version\nfetch\ninstall\n")
+      await Effect.runPromise(use)
+      expect(reads).toBe(2)
+      expect(await Fs.readFile(NodePath.join(root, "calls"), "utf8")).toBe("--version\nfetch\ninstall\n".repeat(2))
     })
   })
 
@@ -464,9 +584,10 @@ describe("PackageManager.storeRoot", () => {
       const invocation = NodePath.join(root, "invocation.json")
       await writeExecutable(
         executable,
-        `import { writeFileSync } from "node:fs"\nwriteFileSync(${
-          JSON.stringify(invocation)
-        }, JSON.stringify(process.argv.slice(2)))`
+        `if (process.argv[2] === "--version") { process.stdout.write("11.21.0\\n"); process.exit(0) }\n` +
+          `import { writeFileSync } from "node:fs"\nwriteFileSync(${
+            JSON.stringify(invocation)
+          }, JSON.stringify(process.argv.slice(2)))`
       )
       const manager = await makePnpm(root, executable)
       await Effect.runPromise(manager.fetch)
@@ -523,7 +644,8 @@ describe("PackageManager.storeRoot", () => {
       await expect(Effect.runPromise(manager.version)).rejects.toThrow(/no larger than/)
 
       await Fs.writeFile(NodePath.join(root, ".npmrc"), Buffer.from([0xff]))
-      await expect(Effect.runPromise(manager.version)).rejects.toThrow(/not valid UTF-8/)
+      const fresh = await makePnpm(root, executable)
+      await expect(Effect.runPromise(fresh.version)).rejects.toThrow(/not valid UTF-8/)
     })
   })
 
@@ -577,7 +699,11 @@ describe("PackageManager.storeRoot", () => {
   it("interrupts a package-manager command that exceeds its deadline", async () => {
     await withFixture("package-manager-timeout", async (root) => {
       const executable = NodePath.join(root, "pnpm.mjs")
-      await writeExecutable(executable, "setInterval(() => {}, 1_000)")
+      await writeExecutable(
+        executable,
+        "if (process.argv[2] === \"--version\") { process.stdout.write(\"11.21.0\\n\"); process.exit(0) }\n" +
+          "setInterval(() => {}, 1_000)"
+      )
       const manager = await makePnpm(root, executable, { timeoutMs: 100 })
       await expect(Effect.runPromise(manager.fetch)).rejects.toThrow(/did not finish within 100ms/)
     })
@@ -590,7 +716,8 @@ describe("PackageManager.storeRoot", () => {
       const child = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "yes"), 700)`
       await writeExecutable(
         executable,
-        "import { spawn } from \"node:child_process\"\n" +
+        "if (process.argv[2] === \"--version\") { process.stdout.write(\"11.21.0\\n\"); process.exit(0) }\n" +
+          "import { spawn } from \"node:child_process\"\n" +
           `spawn(process.execPath, ["-e", ${JSON.stringify(child)}], { stdio: "ignore" })\n` +
           "setInterval(() => {}, 1_000)"
       )
@@ -981,9 +1108,10 @@ describe("PackageManager link", () => {
       const invocation = NodePath.join(root, "invocation.json")
       await writeExecutable(
         executable,
-        `import { writeFileSync } from "node:fs"\nwriteFileSync(${
-          JSON.stringify(invocation)
-        }, JSON.stringify(process.argv.slice(2)))`
+        `if (process.argv[2] === "--version") { process.stdout.write("11.21.0\\n"); process.exit(0) }\n` +
+          `import { writeFileSync } from "node:fs"\nwriteFileSync(${
+            JSON.stringify(invocation)
+          }, JSON.stringify(process.argv.slice(2)))`
       )
       const manager = await makePnpm(root, executable)
       await Effect.runPromise(manager.link)

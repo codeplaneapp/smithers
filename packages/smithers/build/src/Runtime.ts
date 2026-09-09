@@ -179,7 +179,7 @@ export interface Service {
   readonly requirement: string
   /** The host facts this layer was constructed for. */
   readonly platform: Platform
-  /** The exact interpreter version, measured by running it. */
+  /** The exact interpreter version, measured once per live service instance. */
   readonly version: Effect.Effect<string, RuntimeError>
   /**
    * Measures the host interpreter and fails when it does not satisfy
@@ -585,7 +585,7 @@ export const make = (
     const spawner = yield* ChildProcessSpawner
     const normalized = normalizeOptions(options)
     const executable = normalized.executable ?? name
-    const version = measureVersion(spawner, executable, probeEnvironment(normalized))
+    const version = yield* Effect.cached(measureVersion(spawner, executable, probeEnvironment(normalized)))
     return Object.freeze(
       {
         name,

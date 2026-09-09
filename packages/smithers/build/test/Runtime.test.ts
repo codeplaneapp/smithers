@@ -206,6 +206,32 @@ describe("Runtime measurement", () => {
     })
   })
 
+  it("memoizes interpreter measurements per layer instance", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "fake-node.mjs")
+      const calls = NodePath.join(root, "calls")
+      await writeExecutable(
+        executable,
+        `
+        import { appendFileSync } from "node:fs"
+        appendFileSync(${JSON.stringify(calls)}, process.argv[2] + "\\n")
+        process.stdout.write("v24.9.0\\n")
+      `
+      )
+      const layer = Runtime.layerNode({ requirement: ">=22.19.0", platform, executable })
+      const use = Effect.gen(function*() {
+        const service = yield* Runtime.Runtime
+        expect(yield* Effect.all([service.version, service.verify], { concurrency: "unbounded" }))
+          .toEqual(["24.9.0", "24.9.0"])
+        expect(yield* service.verify).toBe("24.9.0")
+      }).pipe(Effect.provide(layer), Effect.provide(NodeServices.layer))
+      await Effect.runPromise(use)
+      expect(await Fs.readFile(calls, "utf8")).toBe("--version\n")
+      await Effect.runPromise(use)
+      expect(await Fs.readFile(calls, "utf8")).toBe("--version\n--version\n")
+    })
+  })
+
   it("reads the first version-shaped token on the first line", async () => {
     await withFixture(async (root) => {
       const executable = NodePath.join(root, "chatty-bun.mjs")

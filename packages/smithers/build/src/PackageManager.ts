@@ -290,7 +290,7 @@ export interface Service {
   readonly platformSensitive: boolean
   /** The version the workspace declared it requires. */
   readonly requirement: string
-  /** The exact manager version, measured by running the manager. */
+  /** The exact manager version, measured once per live service instance. */
   readonly version: Effect.Effect<string, PackageManagerError>
   /**
    * Measures the host manager and fails when it does not satisfy
@@ -877,6 +877,42 @@ const verified = (
       )
   })
 
+/** Resolves the default Windows shim without ever invoking a command shell. */
+const pnpmInvocation = (
+  fs: FileSystem.FileSystem,
+  options: NormalizedOptions,
+  runtimeExecutable: string
+): Effect.Effect<{ readonly executable: string; readonly prefix: ReadonlyArray<string> }, PackageManagerError> =>
+  Effect.gen(function*() {
+    if (options.executable !== undefined || options.platform.os !== "win32") {
+      return { executable: options.executable ?? "pnpm", prefix: [] }
+    }
+    const mismatch = (shim: string) =>
+      new PackageManagerError({
+        code: "environment_mismatch",
+        message:
+          `cannot resolve ${shim} to adjacent node_modules/pnpm/bin/pnpm.cjs; provide a native executable override`
+      })
+    const path = Validate.sourceValue(options.environment, "PATH", true) ?? ""
+    for (const component of path.split(";")) {
+      const directory = component.replace(/^"(.*)"$/, "$1")
+      if (directory === "") continue
+      const absolute = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(directory)
+        ? directory
+        : `${options.projectRoot}/${directory}`
+      const shim = `${absolute}/pnpm.cmd`
+      const present = yield* fs.exists(shim).pipe(Effect.mapError(() => mismatch(shim)))
+      if (!present) continue
+      // Honor the first shim on PATH. A different layout must be explicit,
+      // rather than silently selecting a different pnpm later on PATH.
+      const entry = `${absolute}/node_modules/pnpm/bin/pnpm.cjs`
+      const info = yield* fs.stat(entry).pipe(Effect.mapError(() => mismatch(shim)))
+      if (info.type !== "File") return yield* Effect.fail(mismatch(shim))
+      return { executable: runtimeExecutable, prefix: [entry] }
+    }
+    return yield* Effect.fail(mismatch("pnpm.cmd on PATH"))
+  })
+
 /**
  * Builds the pnpm implementation.
  *
@@ -899,35 +935,28 @@ export const makePnpm = (options: Options): Effect.Effect<
     const spawner = yield* ChildProcessSpawner
     const fs = yield* FileSystem.FileSystem
     const normalized = normalizeOptions(options, runtime.platform)
-    // `pnpm` on Windows is a `pnpm.cmd` shim, and Node's spawn resolves `.exe`
-    // through the image path but never appends `PATHEXT`, so spawning the bare
-    // name fails with ENOENT before the manager runs. That took down 52 targets
-    // on the windows row of the package matrix. A caller that names its own
-    // executable keeps it verbatim, extension and all.
-    // `pnpm` on Windows is a `pnpm.cmd` shim, and Node's spawn resolves an
-    // image path through `.exe` but never appends `PATHEXT`, so spawning the
-    // bare name fails with `spawn pnpm ENOENT` before the manager runs. That
-    // took down 52 of 156 targets on the windows row of the package matrix. A
-    // caller that names its own executable keeps it verbatim, extension included.
-    const executable = normalized.executable ??
-      (normalized.platform.os === "win32" ? "pnpm.cmd" : "pnpm")
+    const invocation = yield* Effect.cached(pnpmInvocation(fs, normalized, runtime.executable))
+    const environment = yield* Effect.cached(managerEnvironment(fs, normalized))
     const projectRoot = normalized.projectRoot
     const timeoutMs = normalized.timeoutMs
     const storeDirectory = `${storeRoot}/pnpm`
     const storeArgs = ["--store-dir", `${projectRoot}/${storeDirectory}`]
-    const command = (label: string, args: ReadonlyArray<string>) =>
-      Effect.flatMap(
-        managerEnvironment(fs, normalized),
-        (environment) =>
-          run(spawner, label, managerCommand(executable, args, projectRoot, environment, "inherit"), timeoutMs)
-      )
-    const version = Effect.flatMap(managerEnvironment(fs, normalized), (environment) =>
-      capture(
-        spawner,
-        "pnpm --version",
-        managerCommand(executable, ["--version"], projectRoot, environment, "capture"),
-        timeoutMs
-      ))
+    const command = (args: ReadonlyArray<string>, output: "capture" | "inherit") =>
+      Effect.gen(function*() {
+        const env = yield* environment
+        const { executable, prefix } = yield* invocation
+        return managerCommand(executable, [...prefix, ...args], projectRoot, env, output)
+      })
+    const version = yield* Effect.cached(
+      Effect.flatMap(command(["--version"], "capture"), (child) => capture(spawner, "pnpm --version", child, timeoutMs))
+    )
+    const verify = verified("pnpm", normalized.requirement, version)
+    const execute = (label: string, args: ReadonlyArray<string>) =>
+      Effect.gen(function*() {
+        yield* verify
+        const child = yield* command(args, "inherit")
+        yield* run(spawner, label, child, timeoutMs)
+      })
     return Object.freeze(
       {
         name: "pnpm",
@@ -937,12 +966,12 @@ export const makePnpm = (options: Options): Effect.Effect<
         platformSensitive: true,
         requirement: normalized.requirement,
         version,
-        verify: verified("pnpm", normalized.requirement, version),
-        fetch: command(
+        verify,
+        fetch: execute(
           "pnpm fetch",
           ["fetch", "--frozen-lockfile", "--ignore-scripts", "--reporter=append-only", ...storeArgs]
         ),
-        link: command(
+        link: execute(
           "pnpm install --offline",
           [
             "install",
@@ -1211,11 +1240,11 @@ export const storeManifest = (input: {
   )
 
 /**
- * Computes the digest used to decide whether a linked tree is still fresh.
+ * Reports a digest of store identity, the root package manifest, and manager metadata.
  *
- * The manager evidence describes the tree it produced. The store digest and
- * root package manifest describe what it was asked to produce. Folding all
- * three prevents a changed `package.json` from reusing an old local marker.
+ * This metadata is not an installed-tree freshness proof. It does not inspect
+ * installed package bytes or establish their integrity; link always reconciles
+ * the tree before reporting this digest.
  *
  * @category constructors
  * @since 0.1.0

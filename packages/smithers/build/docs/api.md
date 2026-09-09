@@ -61,7 +61,18 @@ tree pointing at nothing. `link` therefore always runs.
 `PackageManager.Service` is the two-verb contract every manager implements:
 `fetch` populates the store, `link` materializes `node_modules`. `verify`
 measures the host manager and fails when it does not satisfy the declared
-`requirement`; both verbs call it first.
+`requirement`; both verbs call it first. Each live service instance lazily
+memoizes its version probe and the validated `.npmrc` environment selection,
+including failures. Every `verify` compares that measurement with the declaration.
+Rebuild the layer to measure changes to the executable or project configuration.
+
+On Windows the default resolves the first `pnpm.cmd` on the supplied environment's
+`PATH` to adjacent `node_modules/pnpm/bin/pnpm.cjs`, then runs that file with the
+runtime service's executable. No shell is used. An unresolved shim fails with
+`environment_mismatch`; a native `executable` override supports other layouts.
+
+`linkedTreeManifest` reports store identity, the root package manifest, and manager
+metadata. It is not an installed-tree freshness or integrity proof.
 
 ```ts
 import * as PackageManager from "@smthrs/build/PackageManager"
@@ -93,7 +104,10 @@ approximating a verified fetch.
 
 `Runtime.Service` is the interpreter seam. It reports the declared
 `requirement`, the host `platform` it was built for, the measured `version`, and
-`verify`, which fails when the host does not satisfy the declaration.
+`verify`, which fails when the host does not satisfy the declaration. Each live
+service instance lazily memoizes the interpreter version probe, including failures.
+Every `verify` compares that measurement with the declaration; rebuild the layer
+to measure a changed interpreter.
 
 ```ts
 import * as Runtime from "@smthrs/build/Runtime"
