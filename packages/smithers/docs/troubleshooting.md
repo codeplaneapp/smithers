@@ -260,11 +260,15 @@ runner you typed.
 **Symptom.** `smthrs mcp add` exits 1 and prints manual instructions.
 
 **Cause.** Every target failed. The usual reasons are an `mcpServers` member
-that is not an object, an unreadable configuration file, or a stale lock file
-beside it.
+that is not an object, an unreadable configuration file, or a lock file beside
+it that another Smithers process still holds.
 
 **Fix.** The printed reason names the file. Fix it and run the command again;
 `addMcp` writes through a temp file and a rename, so nothing was half-written.
+A lock records the process that took it. One left behind by a process that has
+since died is reclaimed on the next run. One that is still held is reported
+with its owner's pid and its own path, so it can be deleted by hand once that
+process is gone.
 
 ## See also
 

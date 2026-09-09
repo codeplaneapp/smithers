@@ -7,6 +7,7 @@
  * `bunx smthrs --mcp`, which pointed every agent at the last published build
  * regardless of what the operator was running.
  */
+import { spawnSync } from "node:child_process"
 import {
   chmodSync,
   existsSync,
@@ -17,6 +18,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -35,6 +37,25 @@ const home = (): string => {
 afterEach(() => {
   while (staged.length > 0) rmSync(staged.pop()!, { recursive: true, force: true })
 })
+
+/**
+ * A pid that is provably gone: a child this process has already reaped.
+ *
+ * Naming a pid that never ran would prove nothing, because the kernel is free
+ * to hand that number to a live process at any moment.
+ */
+const departedPid = (): number => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { pid } = spawnSync(process.execPath, ["-e", ""])
+    if (pid === undefined) continue
+    try {
+      process.kill(pid, 0)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return pid
+    }
+  }
+  throw new Error("could not observe an exited pid")
+}
 
 describe("the known agents", () => {
   it("is Claude Code and Codex, and nothing that moved to the plugins repository", () => {
@@ -161,6 +182,73 @@ describe("registering the MCP server", () => {
     expect(wired.reason).toMatch(/another Smithers process/)
     expect(readFileSync(path, "utf8")).toBe(original)
     expect(readdirSync(directory).filter((entry) => entry.endsWith(".tmp"))).toEqual([])
+  })
+
+  it("recovers a lock left behind by a process that is gone", () => {
+    const directory = home()
+    const path = join(directory, ".claude.json")
+    const lockPath = `${path}.smithers.lock`
+    writeFileSync(path, "{}\n")
+    writeFileSync(lockPath, `${departedPid()}:${Date.now()}:abandoned`, { mode: 0o600 })
+
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    // A crash inside the write used to leave a lock no later run could clear,
+    // so every registration after it refused for as long as the file existed.
+    expect(wired.status).toBe("written")
+    expect(JSON.parse(readFileSync(path, "utf8")).mcpServers.smithers).toBeDefined()
+    expect(existsSync(lockPath)).toBe(false)
+  })
+
+  it("refuses while the recorded owner is still running, and names the lock file", () => {
+    const directory = home()
+    const path = join(directory, ".claude.json")
+    const lockPath = `${path}.smithers.lock`
+    const original = "{\"theme\":\"operator-edit\"}\n"
+    writeFileSync(path, original)
+    writeFileSync(lockPath, `${process.pid}:${Date.now()}:live`, { mode: 0o600 })
+
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(wired.status).toBe("failed")
+    expect(wired.reason).toContain(lockPath)
+    expect(wired.reason).toContain(String(process.pid))
+    expect(readFileSync(path, "utf8")).toBe(original)
+    expect(existsSync(lockPath)).toBe(true)
+
+    // A lock holding nothing but the pid still names that whole pid: reading
+    // it a digit short would ask about a process that never took this lock.
+    writeFileSync(lockPath, String(process.pid), { mode: 0o600 })
+
+    const bare = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(bare.status).toBe("failed")
+    expect(bare.reason).toContain(`(pid ${process.pid})`)
+    expect(readFileSync(path, "utf8")).toBe(original)
+  })
+
+  it("recovers an ownerless lock only once its creator cannot still be writing", () => {
+    // What a 0.x lock looks like, and what a kill between creating the lock
+    // and recording its owner would leave: a file with nobody to ask about.
+    const directory = home()
+    const path = join(directory, ".claude.json")
+    const lockPath = `${path}.smithers.lock`
+    writeFileSync(path, "{}\n")
+    writeFileSync(lockPath, "", { mode: 0o600 })
+
+    const fresh = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(fresh.status).toBe("failed")
+    expect(fresh.reason).toContain(lockPath)
+    expect(existsSync(lockPath)).toBe(true)
+
+    const abandoned = new Date(Date.now() - 6 * 60_000)
+    utimesSync(lockPath, abandoned, abandoned)
+
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(wired.status).toBe("written")
+    expect(existsSync(lockPath)).toBe(false)
   })
 
   it("reports a configuration it cannot write", () => {
