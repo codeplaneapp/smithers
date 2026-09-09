@@ -31,7 +31,7 @@ const WORDMARK = [
 ]
 const lessons = [
   [
-    "A small beginning",
+    "",
     "Hello. I’m Smithers.",
     "Let me show how Smithers works",
   ],
@@ -311,7 +311,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
           <div className="guide-sigil" aria-hidden="true">
             <Sparkles size={22} strokeWidth={1.2} />
           </div>
-          <p className="guide-eyebrow">{eyebrow}</p>
+          {eyebrow && <p className="guide-eyebrow">{eyebrow}</p>}
           <h1 id="guide-title">{title}</h1>
           <div className="guide-dialogue smithers-control" data-controlled={stage < 7 || stage === 10}>
             <div className="guide-speaker">
