@@ -1231,6 +1231,9 @@ importers:
       '@types/bun':
         specifier: latest
         version: 1.4.2
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

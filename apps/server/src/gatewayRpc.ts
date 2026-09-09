@@ -13,7 +13,12 @@
  *
  *   request  {"_tag":"Request","id":1,"tag":"List","payload":{…},"headers":[]}
  *   success  {"_tag":"Exit","requestId":1,"exit":{"_tag":"Success","value":…}}
- *   failure  {"_tag":"Exit","requestId":1,"exit":{"_tag":"Failure","cause":…}}
+ *   failure  {"_tag":"Exit","requestId":1,"exit":{"_tag":"Failure","cause":[…]}}
+ *
+ * A failure `cause` is Effect's array of reasons — `{_tag:"Fail",error}`,
+ * `{_tag:"Die",defect}`, `{_tag:"Interrupt",fiberId}` (`ExitEncoded` in
+ * `effect/unstable/rpc/RpcMessage`) — and `gatewayRpc.test.ts` pins that shape
+ * against the installed codec.
  */
 
 /**
@@ -100,6 +105,33 @@ const typedError = (cause: unknown): Record<string, unknown> => {
 }
 
 /**
+ * The reason an encoded cause leads with when no `Fail` is in it.
+ *
+ * `ExitEncoded` also carries `{ _tag: "Die", defect }` for a workspace that
+ * crashed and `{ _tag: "Interrupt", fiberId }` for one whose fiber was
+ * cancelled. Neither is a refusal, and a client told "the workspace refused
+ * the call" for all three cannot tell a bug from a cancellation from a
+ * decision. A `Fail` still wins where one exists: it is the answer the
+ * workspace chose to state.
+ */
+const untypedReason = (cause: unknown): Record<string, unknown> | undefined => {
+  if (!Array.isArray(cause)) return undefined
+  const reasons = cause.map(asRecord)
+  if (reasons.some((reason) => reason._tag === "Fail")) return undefined
+  return reasons.find((reason) => reason._tag === "Die" || reason._tag === "Interrupt")
+}
+
+/**
+ * What a defect states. `Schema.Defect` encodes a thrown `Error` as its `name`
+ * and `message` and any other defect as its JSON, so the message is read off
+ * the record where there is one and the defect itself where it is a string.
+ */
+const defectMessage = (defect: unknown): string | undefined => {
+  const message = typeof defect === "string" ? defect : asRecord(defect).message
+  return typeof message === "string" && message !== "" ? message : undefined
+}
+
+/**
  * The first sentence of a gateway failure. Effect encodes a typed error as the
  * cause's payload, so the tag and message are read off it where they exist and
  * the whole cause is carried as the detail either way: a refusal the seam
@@ -111,6 +143,12 @@ const typedError = (cause: unknown): Record<string, unknown> => {
  */
 const describeCause = (cause: unknown): string => {
   if (typeof cause !== "object" || cause === null) return "The workspace refused the call."
+  const untyped = untypedReason(cause)
+  if (untyped !== undefined) {
+    if (untyped._tag === "Interrupt") return "The workspace cancelled the call."
+    const defect = defectMessage(untyped.defect)
+    return defect === undefined ? "The workspace crashed." : `The workspace crashed: ${defect}`
+  }
   const typed = typedError(cause)
   if ((typed._tag === "/control/FlowNotFound" || typed.code === "flow_not_found") && typeof typed.flowId === "string") {
     return `No flow "${typed.flowId}" is registered on this workspace.`
