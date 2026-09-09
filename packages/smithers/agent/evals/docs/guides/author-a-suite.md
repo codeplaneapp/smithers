@@ -106,6 +106,9 @@ a runner:
 | `cases`         | 10000   | The cases in one suite                          |
 | `fixtureLength` | 8388608 | The UTF-16 code units in one JSON Lines fixture |
 
-A fixture larger than `fixtureLength` is rejected before any of it is parsed.
+Each ceiling is inclusive. A fixture larger than `fixtureLength` is rejected
+before any of it is parsed. After 10000 cases, the next non-blank line fails
+with `invalid_suite` at `cases`, before parsing or decoding that line or any
+later lines. The message reports `got 10001`, the first excess case.
 
 Next: [run the suite](./run-a-suite.md).

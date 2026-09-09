@@ -312,6 +312,8 @@ const jsonCase = Schema.Struct({
  * and CRLF terminate a line. A malformed line fails with `invalid_suite`
  * carrying the 1-based line number in both the message and the path; a fixture
  * larger than `limits.fixtureLength` is rejected before any of it is parsed.
+ * The first non-blank line after `limits.cases` cases fails with
+ * `invalid_suite` at `cases` before it or any later line is parsed or decoded.
  *
  * @category constructors
  * @since 0.1.0
@@ -331,6 +333,15 @@ export const fromJsonLines = (text: string, options: JsonLinesOptions): Effect.E
     for (const [index, line] of body.split(/\r?\n/).entries()) {
       const trimmed = line.trim()
       if (trimmed.length === 0) continue
+      // Stop at the ceiling before parsing or decoding the excess line: a
+      // fixture under the length limit can still hold hundreds of thousands
+      // of tiny lines, and reporting the count only in make() would parse and
+      // materialize every one of them first.
+      if (cases.length === limits.cases) {
+        return yield* Effect.fail(
+          invalid(`Suite must contain at most ${limits.cases} cases, got ${cases.length + 1}`, "cases")
+        )
+      }
       const decoded = yield* Effect.try({
         try: () => JSON.parse(trimmed) as unknown,
         catch: (cause) => invalid(`Invalid JSON on line ${index + 1}`, `line[${index + 1}]`, cause)

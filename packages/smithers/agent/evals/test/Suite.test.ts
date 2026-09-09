@@ -32,6 +32,30 @@ const judge = Scorer.make<JudgeUnavailable>({
 })
 
 describe("Suite", () => {
+  it("pins the documented numeric ceilings", () => {
+    expect(Suite.limits).toEqual({ cases: 10_000, concurrency: 1024, fixtureLength: 8_388_608 })
+  })
+
+  it.each([9_999, 10_000])("accepts %i unique cases", async (count) => {
+    const cases = Array.from({ length: count }, (_, index) => ({ name: `case-${index}`, input: index }))
+    const suite = await Effect.runPromise(Suite.make({ name: "boundary", concurrency: 1, cases }))
+    expect(suite.cases).toHaveLength(count)
+  })
+
+  it.each([1023, 1024])("accepts concurrency %i", async (concurrency) => {
+    const suite = await Effect.runPromise(
+      Suite.make({ name: "boundary", concurrency, cases: [{ name: "a", input: 1 }] })
+    )
+    expect(suite.concurrency).toBe(concurrency)
+  })
+
+  it("rejects concurrency 1025", async () => {
+    const error = await failure(Suite.make({ name: "boundary", concurrency: 1025, cases: [{ name: "a", input: 1 }] }))
+    expect(error.code).toBe("invalid_suite")
+    expect(error.message).toBe("Suite concurrency must be at most 1024, got 1025")
+    expect(error.path).toBe("concurrency")
+  })
+
   it("rejects an empty or control-character suite name", async () => {
     const empty = await failure(Suite.make({ name: "  ", concurrency: 1, cases: [{ name: "a", input: 1 }] }))
     expect(empty.code).toBe("invalid_suite")
@@ -69,10 +93,10 @@ describe("Suite", () => {
     const tooMany = await failure(Suite.make({
       name: "x",
       concurrency: 1,
-      cases: Array.from({ length: Suite.limits.cases + 1 }, (_, index) => ({ name: `case-${index}`, input: index }))
+      cases: Array.from({ length: 10_001 }, (_, index) => ({ name: `case-${index}`, input: index }))
     }))
     expect(tooMany.message).toBe(
-      `Suite must contain at most ${Suite.limits.cases} cases, got ${Suite.limits.cases + 1}`
+      "Suite must contain at most 10000 cases, got 10001"
     )
     expect(tooMany.path).toBe("cases")
   })
@@ -88,7 +112,7 @@ describe("Suite", () => {
       Suite.make({ name: "x", concurrency: Number.MAX_SAFE_INTEGER, cases })
     )
     expect(tooWide.message).toBe(
-      `Suite concurrency must be at most ${Suite.limits.concurrency}, got ${Number.MAX_SAFE_INTEGER}`
+      "Suite concurrency must be at most 1024, got 9007199254740991"
     )
   })
 
@@ -448,14 +472,58 @@ describe("Suite", () => {
     expect(invalid.path).toBe("line[1]")
   })
 
+  it.each([9_999, 10_000])("loads %i JSON Lines cases with trailing blank lines", async (count) => {
+    const text = Array.from({ length: count }, (_, index) => JSON.stringify({ name: `case-${index}`, input: index }))
+      .join("\n") + "\n \t\n"
+    const suite = await Effect.runPromise(Suite.fromJsonLines(text, { name: "boundary", concurrency: 1 }))
+    expect(suite.cases).toHaveLength(count)
+  })
+
+  it.each(["valid", "malformed", "schema-invalid"])(
+    "stops before decoding a %s excess JSON Lines case",
+    async (kind) => {
+      const lines = Array.from(
+        { length: 10_000 },
+        (_, index) => JSON.stringify({ name: `case-${index}`, input: index })
+      )
+      const extra = kind === "valid" ? "{\"name\":\"excess\",\"input\":1}" : kind === "malformed" ? "not JSON" : "{}"
+      const error = await failure(Suite.fromJsonLines(
+        [...lines, extra, "deliberately not JSON"].join("\n"),
+        { name: "boundary", concurrency: 1 }
+      ))
+      expect(error.code).toBe("invalid_suite")
+      expect(error.message).toBe("Suite must contain at most 10000 cases, got 10001")
+      expect(error.path).toBe("cases")
+    }
+  )
+
+  it.each([8_388_607, 8_388_608, 8_388_609])("checks a fixture of %i UTF-16 code units", async (length) => {
+    // The astral character occupies two UTF-16 code units, but one code point
+    // and four UTF-8 bytes. Padding inside the JSON string survives trim().
+    const prefix = "{\"name\":\"astral\",\"input\":\"😀"
+    const suffix = "\"}"
+    const padding = "x".repeat(length - prefix.length - suffix.length)
+    const text = prefix + padding + suffix
+    expect(text.length).toBe(length)
+    const effect = Suite.fromJsonLines(text, { name: "boundary", concurrency: 1 })
+    if (length === 8_388_609) {
+      const error = await failure(effect)
+      expect(error.code).toBe("invalid_suite")
+      expect(error.message).toBe("JSON Lines fixture must be at most 8388608 characters, got 8388609")
+      expect(error.path).toBe("text")
+    } else {
+      const suite = await Effect.runPromise(effect)
+      expect(suite.cases).toHaveLength(1)
+      expect(suite.cases[0]?.input).toBe("😀" + padding)
+    }
+  })
+
   it("refuses a fixture larger than the declared ceiling before parsing any of it", async () => {
     const oversize = await failure(
-      Suite.fromJsonLines("x".repeat(Suite.limits.fixtureLength + 1), { name: "f", concurrency: 1 })
+      Suite.fromJsonLines("x".repeat(8_388_609), { name: "f", concurrency: 1 })
     )
     expect(oversize.message).toBe(
-      `JSON Lines fixture must be at most ${Suite.limits.fixtureLength} characters, got ${
-        Suite.limits.fixtureLength + 1
-      }`
+      "JSON Lines fixture must be at most 8388608 characters, got 8388609"
     )
     expect(oversize.path).toBe("text")
   })

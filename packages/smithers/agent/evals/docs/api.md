@@ -226,7 +226,10 @@ Loads the `{ name, input, expected? }` JSON Lines fixture format.
 skipped, a leading byte-order mark is stripped, and both LF and CRLF terminate
 a line. A malformed line fails with `invalid_suite` carrying the 1-based line
 number in both the message and the path; a fixture larger than
-`limits.fixtureLength` is rejected before any of it is parsed.
+`limits.fixtureLength` is rejected before any of it is parsed. All ceilings
+are inclusive. After 10000 cases, the next non-blank line fails before parsing
+or decoding with `invalid_suite` at `cases` and the message
+`Suite must contain at most 10000 cases, got 10001`; later lines are not decoded.
 
 ### CaseExecutor
 
