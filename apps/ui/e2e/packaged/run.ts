@@ -21,9 +21,6 @@ const forwardSignal = (signal: NodeJS.Signals): void => {
   }
 }
 
-process.on("SIGINT", () => forwardSignal("SIGINT"))
-process.on("SIGTERM", () => forwardSignal("SIGTERM"))
-
 const run = async (
   label: string,
   argv: ReadonlyArray<string>,
@@ -51,57 +48,66 @@ const copyOnWriteDirectory = async (source: string, destination: string): Promis
   })
 }
 
-const stagePackageProject = async (): Promise<{
+export const stagePackageProject = async (): Promise<{
   readonly root: string
   readonly ui: string
   readonly hutchHome: string
 }> => {
   const root = await mkdtemp(join(tmpdir(), `smithers-electrobun-package-${process.pid}-`))
-  const workspace = join(root, "workspace")
-  const ui = join(workspace, "apps", "ui")
-  await mkdir(join(workspace, "apps"), { recursive: true })
-  const excluded = new Set([".hutch", "artifacts", "build", "node_modules", "packaged-runtime", "test-results"])
-  await cp(UI_DIRECTORY, ui, {
-    recursive: true,
-    mode: constants.COPYFILE_FICLONE,
-    filter: (source) => {
-      const path = relative(UI_DIRECTORY, source)
-      const top = path.split(sep)[0]
-      return path === "" || top === undefined || !excluded.has(top)
+  try {
+    const workspace = join(root, "workspace")
+    const ui = join(workspace, "apps", "ui")
+    await mkdir(join(workspace, "apps"), { recursive: true })
+    const excluded = new Set([".hutch", "artifacts", "build", "node_modules", "packaged-runtime", "test-results"])
+    await cp(UI_DIRECTORY, ui, {
+      recursive: true,
+      mode: constants.COPYFILE_FICLONE,
+      filter: (source) => {
+        const path = relative(UI_DIRECTORY, source)
+        const top = path.split(sep)[0]
+        return path === "" || top === undefined || !excluded.has(top)
+      }
+    })
+    await cp(join(UI_DIRECTORY, "packaged-runtime"), join(ui, "packaged-runtime"), {
+      recursive: true,
+      mode: constants.COPYFILE_FICLONE,
+      verbatimSymlinks: true
+    })
+    await symlink(join(UI_DIRECTORY, "node_modules"), join(ui, "node_modules"), "dir")
+
+    // Preserve pnpm's real workspace view without copying or mutating sibling
+    // packages. In particular, verifyDepsBeforeRun=false prevents Hutch's
+    // package hook from trying to install a standalone app with workspace: deps.
+    for (const file of ["package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml", "bun.lock"]) {
+      await cp(join(ROOT_DIRECTORY, file), join(workspace, file))
     }
-  })
-  await cp(join(UI_DIRECTORY, "packaged-runtime"), join(ui, "packaged-runtime"), {
-    recursive: true,
-    mode: constants.COPYFILE_FICLONE,
-    verbatimSymlinks: true
-  })
-  await symlink(join(UI_DIRECTORY, "node_modules"), join(ui, "node_modules"), "dir")
+    await symlink(join(ROOT_DIRECTORY, "node_modules"), join(workspace, "node_modules"), "dir")
+    for (const directory of ["packages", "e2e", "examples", "patches"]) {
+      await symlink(join(ROOT_DIRECTORY, directory), join(workspace, directory), "dir")
+    }
+    for (const entry of await readdir(join(ROOT_DIRECTORY, "apps"), { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === "ui") continue
+      await symlink(join(ROOT_DIRECTORY, "apps", entry.name), join(workspace, "apps", entry.name), "dir")
+    }
 
-  // Preserve pnpm's real workspace view without copying or mutating sibling
-  // packages. In particular, verifyDepsBeforeRun=false prevents Hutch's
-  // package hook from trying to install a standalone app with workspace: deps.
-  for (const file of ["package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml", "bun.lock"]) {
-    await cp(join(ROOT_DIRECTORY, file), join(workspace, file))
+    // Hutch serializes access to its global release graph. Copy-on-write clones
+    // retain the exact installed bits while giving this package run private
+    // lock inodes, so a live `electrobun dev` cannot block its writer.
+    const sharedHutchHome = process.env.HUTCH_HOME ?? join(homedir(), ".hutch")
+    const hutchHome = join(root, "hutch")
+    await mkdir(hutchHome, { recursive: true })
+    for (const directory of ["releases", "toolchains", "npm"]) {
+      await copyOnWriteDirectory(join(sharedHutchHome, directory), join(hutchHome, directory))
+    }
+    return { root, ui, hutchHome }
+  } catch (error) {
+    try {
+      await cleanupStage(root)
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Package staging and cleanup both failed.")
+    }
+    throw error
   }
-  await symlink(join(ROOT_DIRECTORY, "node_modules"), join(workspace, "node_modules"), "dir")
-  for (const directory of ["packages", "e2e", "examples", "patches"]) {
-    await symlink(join(ROOT_DIRECTORY, directory), join(workspace, directory), "dir")
-  }
-  for (const entry of await readdir(join(ROOT_DIRECTORY, "apps"), { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name === "ui") continue
-    await symlink(join(ROOT_DIRECTORY, "apps", entry.name), join(workspace, "apps", entry.name), "dir")
-  }
-
-  // Hutch serializes access to its global release graph. Copy-on-write clones
-  // retain the exact installed bits while giving this package run private
-  // lock inodes, so a live `electrobun dev` cannot block its writer.
-  const sharedHutchHome = process.env.HUTCH_HOME ?? join(homedir(), ".hutch")
-  const hutchHome = join(root, "hutch")
-  await mkdir(hutchHome, { recursive: true })
-  for (const directory of ["releases", "toolchains", "npm"]) {
-    await copyOnWriteDirectory(join(sharedHutchHome, directory), join(hutchHome, directory))
-  }
-  return { root, ui, hutchHome }
 }
 
 const cleanupStage = async (root: string): Promise<void> => {
@@ -127,6 +133,8 @@ const findStableDiskImage = async (uiDirectory: string): Promise<string> => {
 }
 
 const main = async (): Promise<void> => {
+  process.on("SIGINT", () => forwardSignal("SIGINT"))
+  process.on("SIGTERM", () => forwardSignal("SIGTERM"))
   if (process.platform !== "darwin") {
     console.log("SKIP: packaged Electrobun E2E currently supports macOS only.")
     return
@@ -264,7 +272,7 @@ const main = async (): Promise<void> => {
   if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, "Packaged E2E cleanup failed.")
 }
 
-await main().catch((error) => {
+if (import.meta.main) await main().catch((error) => {
   console.error(`[packaged-e2e] FAIL: ${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 1
 })

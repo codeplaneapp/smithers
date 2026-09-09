@@ -560,11 +560,17 @@ it retries bridge timeouts within its deadline. `waitFor` also requires a
 read-only expression because it polls repeatedly.
 
 The runner holds an atomic lease plus a per-test cleanup marker. If a prior
-process died before cleanup, the next run removes its isolated state, writes a
-stale-fixture report, and fails before launching a test. Rerun normally after
-inspection; `SMITHERS_E2E_RECOVER_STALE=1 bun run test:e2e` explicitly repairs
-and continues in a single invocation. The packaged lane is macOS-only and the
-GitHub fixture scenario requires network access.
+process died before cleanup, the next run preserves its isolated state, writes a
+stale-fixture report, and fails before launching a test.
+`SMITHERS_E2E_RECOVER_STALE=1 bun run test:e2e` explicitly repairs a readable
+lease whose owner is no longer alive and continues in a single invocation.
+Recovery and cleanup claim and recheck the lease generation before moving it
+aside for deletion. Missing or unreadable leases may belong to initializing
+owners and are always preserved. An interrupted retirement leaves a `.retiring`
+guard; inspect and remove the abandoned registry only after confirming no
+suite is running. Failed package staging removes its temporary workspace and
+reports both errors if cleanup also fails. The packaged lane is macOS-only and
+the GitHub fixture scenario requires network access.
 
 
 ### Approval ownership

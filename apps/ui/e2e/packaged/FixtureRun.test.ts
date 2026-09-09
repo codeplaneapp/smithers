@@ -45,7 +45,7 @@ describe("the packaged E2E fixture lease", () => {
     const run = await PackagedFixtureRun.start({ registryDirectory: registry })
     const leaked = await run.beginTest("leaked test")
 
-    expect(run.beginTest("must not run")).rejects.toThrow("cleanup never completed for prior test")
+    await expect(run.beginTest("must not run")).rejects.toThrow("cleanup never completed for prior test")
     await leaked.cleanup()
     await run.cleanup()
   })
@@ -56,7 +56,7 @@ describe("the packaged E2E fixture lease", () => {
     const fixture = await first.beginTest("live")
     await writeFile(join(fixture.directory, "sentinel"), "keep")
 
-    expect(PackagedFixtureRun.start({ registryDirectory: registry })).rejects.toThrow(
+    await expect(PackagedFixtureRun.start({ registryDirectory: registry })).rejects.toThrow(
       "Another packaged E2E run is active"
     )
     expect(await readFile(join(fixture.directory, "sentinel"), "utf8")).toBe("keep")
@@ -64,38 +64,82 @@ describe("the packaged E2E fixture lease", () => {
     await first.cleanup()
   })
 
-  test("detects, reports, repairs, and fails once after a crashed prior suite", async () => {
+  test("preserves an initializing or unreadable owner regardless of recovery permission", async () => {
+    for (const allowStaleRecovery of [false, true]) {
+      for (const leaseText of [undefined, "not json"]) {
+        const registry = await scratch()
+        const work = join(registry, "active", "work")
+        await mkdir(work, { recursive: true })
+        await writeFile(join(work, "sentinel"), "keep")
+        if (leaseText !== undefined) await writeFile(join(registry, "active", "lease.json"), leaseText)
+        await expect(PackagedFixtureRun.start({
+          registryDirectory: registry, allowStaleRecovery, isProcessAlive: () => false
+        })).rejects.toThrow()
+        expect(await readFile(join(work, "sentinel"), "utf8")).toBe("keep")
+      }
+    }
+  })
+
+  test("20 simultaneous acquisitions leave exactly one live owner intact", async () => {
+    for (const allowStaleRecovery of [false, true]) {
+      const registry = await scratch()
+      const results = await Promise.allSettled(Array.from({ length: 20 }, () =>
+        PackagedFixtureRun.start({ registryDirectory: registry, allowStaleRecovery })))
+      const owners = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
+      expect(owners).toHaveLength(1)
+      const owner = owners[0]!
+      const fixture = await owner.beginTest("winning owner")
+      await writeFile(join(fixture.directory, "sentinel"), "keep")
+      const lease = JSON.parse(await readFile(join(registry, "active", "lease.json"), "utf8"))
+      expect(lease.runId).toBe(owner.runId)
+      expect(await readFile(join(fixture.directory, "sentinel"), "utf8")).toBe("keep")
+      await fixture.cleanup()
+      await owner.cleanup()
+    }
+  })
+
+  test("reports a crashed prior suite without deleting it unless recovery is enabled", async () => {
     const registry = await scratch()
     const artifacts = join(registry, "artifacts")
     const crashed = await PackagedFixtureRun.start({ registryDirectory: registry })
     const leaked = await crashed.beginTest("process was killed")
     await writeFile(join(leaked.directory, "orphan"), "stale")
 
-    expect(PackagedFixtureRun.start({
+    await expect(PackagedFixtureRun.start({
       registryDirectory: registry,
       artifactsDirectory: artifacts,
       isProcessAlive: () => false
     })).rejects.toThrow("Detected an unclean prior packaged E2E run")
-    expect(await exists(join(registry, "active"))).toBe(false)
+    expect(await readFile(join(leaked.directory, "orphan"), "utf8")).toBe("stale")
     expect((await Array.fromAsync(new Bun.Glob("stale-fixture.*.json").scan(artifacts))).length).toBe(1)
 
-    const clean = await PackagedFixtureRun.start({ registryDirectory: registry })
+    const clean = await PackagedFixtureRun.start({
+      registryDirectory: registry, allowStaleRecovery: true, isProcessAlive: () => false
+    })
+    expect(await exists(leaked.directory)).toBe(false)
+    await expect(crashed.cleanup()).rejects.toThrow("does not own")
+    expect(await exists(clean.workDirectory)).toBe(true)
     await clean.cleanup()
   })
 
-  test("can explicitly repair a stale or half-written lease and continue in one invocation", async () => {
+  test("concurrent recovery retires only the inspected generation", async () => {
     const registry = await scratch()
-    await mkdir(join(registry, "active"), { recursive: true })
-    await writeFile(join(registry, "active", "lease.json"), "not json")
-    await writeFile(join(registry, "active", "orphan"), "stale")
-
-    const recovered = await PackagedFixtureRun.start({
-      registryDirectory: registry,
-      allowStaleRecovery: true,
-      isProcessAlive: () => false
-    })
-    const fixture = await recovered.beginTest("after recovery")
-    await fixture.cleanup()
-    await recovered.cleanup()
+    const crashed = await PackagedFixtureRun.start({ registryDirectory: registry })
+    const leasePath = join(registry, "active", "lease.json")
+    const lease = JSON.parse(await readFile(leasePath, "utf8"))
+    lease.pid = 99999999
+    await writeFile(leasePath, JSON.stringify(lease))
+    const results = await Promise.allSettled(Array.from({ length: 20 }, () =>
+      PackagedFixtureRun.start({
+        registryDirectory: registry, allowStaleRecovery: true,
+        isProcessAlive: (pid) => pid !== lease.pid
+      })))
+    const owners = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
+    expect(owners).toHaveLength(1)
+    const owner = owners[0]!
+    expect(owner.runId).not.toBe(crashed.runId)
+    expect(JSON.parse(await readFile(leasePath, "utf8")).runId).toBe(owner.runId)
+    expect(await exists(owner.workDirectory)).toBe(true)
+    await owner.cleanup()
   })
 })

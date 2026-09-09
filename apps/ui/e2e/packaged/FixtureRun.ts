@@ -108,6 +108,33 @@ const staleReport = async (
   await atomicJson(path, { detectedAt: new Date().toISOString(), reason, lease: lease ?? null })
 }
 
+// All removal of an active generation goes through this exclusive claim.
+// Moving it aside before recursive deletion keeps a new owner's pathname safe.
+// A crashed claimant leaves the guard in place for manual inspection.
+const retireRun = async (
+  registryDirectory: string,
+  activeDirectory: string,
+  expected: Pick<RunLease, "runId" | "pid">,
+  alive?: (pid: number) => boolean
+): Promise<void> => {
+  const guard = join(activeDirectory, ".retiring")
+  await mkdir(guard, { mode: 0o700 })
+  let retired: string | undefined
+  try {
+    const current = await readJson(join(activeDirectory, LEASE_FILE)).then(parseRunLease, () => undefined)
+    if (current?.runId !== expected.runId || current.pid !== expected.pid) {
+      throw new Error(`Fixture cleanup does not own active run ${expected.runId}.`)
+    }
+    if (alive?.(current.pid)) throw new Error(`Another packaged E2E run is active (pid ${current.pid}).`)
+    const destination = join(registryDirectory, `retired-${randomUUID()}`)
+    await rename(activeDirectory, destination)
+    retired = destination
+  } finally {
+    if (retired === undefined) await rmdir(guard)
+  }
+  await removeInside(registryDirectory, retired)
+}
+
 export class PackagedTestFixture {
   readonly label: string
   readonly directory: string
@@ -168,6 +195,8 @@ export class PackagedFixtureRun {
     const alive = options.isProcessAlive ?? processIsAlive
 
     try {
+      // mkdir is the exclusive acquisition. Until lease publication completes,
+      // every contender must preserve this possibly initializing owner.
       await mkdir(activeDirectory, { mode: 0o700 })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
@@ -180,16 +209,21 @@ export class PackagedFixtureRun {
         )
       }
 
-      const reason = lease === undefined
-        ? "The prior suite left an unreadable lease; cleanup never completed."
-        : `The prior suite process ${lease.pid} is gone but its cleanup lease remains.`
-      await staleReport(options.artifactsDirectory, lease, reason)
-      await removeInside(registryDirectory, activeDirectory)
-      if (options.allowStaleRecovery !== true) {
+      if (lease === undefined) {
         throw new Error(
-          `Detected an unclean prior packaged E2E run. ${reason} Its isolated fixtures were removed; rerun the suite.`
+          "Another packaged E2E run may be initializing: its lease is unreadable. " +
+          "Inspect the registry after confirming no suite is running; fixtures were preserved."
         )
       }
+      const reason = `The prior suite process ${lease.pid} is gone but its cleanup lease remains.`
+      await staleReport(options.artifactsDirectory, lease, reason)
+      if (options.allowStaleRecovery !== true) {
+        throw new Error(
+          `Detected an unclean prior packaged E2E run. ${reason} ` +
+          "Its fixtures were preserved; enable stale recovery after inspection."
+        )
+      }
+      await retireRun(registryDirectory, activeDirectory, lease, alive)
       await mkdir(activeDirectory, { mode: 0o700 })
     }
 
@@ -254,7 +288,7 @@ export class PackagedFixtureRun {
     if (this.closed) return
     const markerExists = await exists(this.activeTestPath)
     const leaked = this.currentTest ?? await readJson(this.activeTestPath).then(parseActiveTestLease, () => undefined)
-    await removeInside(this.registryDirectory, this.activeDirectory)
+    await retireRun(this.registryDirectory, this.activeDirectory, { runId: this.runId, pid: process.pid })
     await rmdir(this.registryDirectory).catch((error: NodeJS.ErrnoException) => {
       // A caller-supplied registry may contain reports, and a new suite may
       // acquire it immediately after this lease is removed.
