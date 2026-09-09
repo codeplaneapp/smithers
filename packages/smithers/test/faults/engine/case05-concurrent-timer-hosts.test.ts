@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, it } from "vitest"
 import { pendingClocks, timerEvidence, waitingRow } from "./harness/durableState.ts"
-import { spawnWaitChild, type WaitChild, type WaitPhase } from "./harness/waitChild.ts"
+import { reapWaitChildren, spawnWaitChild, type WaitChild, type WaitPhase } from "./harness/waitChild.ts"
 import { timerFiredStep } from "./harness/waitFlows.ts"
 
 it("arms two live hosts before one durable deadline and executes its continuation once", async () => {
@@ -113,9 +113,7 @@ it("arms two live hosts before one durable deadline and executes its continuatio
     expect(await bounded(replay.exited)).toBe(0)
     expect(counter()).toEqual([timerFiredStep])
   } finally {
-    await Promise.all(children.map(async (child) => {
-      if (child.process.exitCode === null && child.process.signalCode === null) await killProcess(child.process)
-    }))
+    await reapWaitChildren()
     rmSync(directory, { recursive: true, force: true })
   }
 })

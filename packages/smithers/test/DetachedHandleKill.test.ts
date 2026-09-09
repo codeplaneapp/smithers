@@ -63,10 +63,24 @@ describe("terminating a SIGTERM-trapping child on a host that has no process gro
     const pid = child.pid
     if (pid === undefined) throw new Error("the fixture child did not start")
 
-    // SIGTERM is swallowed, so the first reap window expires and the second
-    // signal is the one that ends it. A `false` here is the failure this case
-    // exists for: the caller would report an orphan-prone launch as contained.
-    expect(await Detached.terminate(child, 500, "win32")).toBe(true)
-    expect(await until(() => processGone(pid), 5_000)).toBe(true)
+    try {
+      // SIGTERM is swallowed, so the first reap window expires and the second
+      // signal is the one that ends it. A `false` here is the failure this
+      // case exists for: the caller would report an orphan-prone launch as
+      // contained.
+      expect(await Detached.terminate(child, 500, "win32")).toBe(true)
+      expect(await until(() => processGone(pid), 5_000)).toBe(true)
+    } finally {
+      // The fixture traps SIGTERM and holds an interval open, so the operation
+      // under test failing is exactly the case where this child would outlive
+      // the run. Cleanup cannot be the thing being asserted about.
+      if (!processGone(pid)) {
+        try {
+          process.kill(pid, "SIGKILL")
+        } catch {
+          // Already gone between the check and the signal.
+        }
+      }
+    }
   }, 30_000)
 })

@@ -14,11 +14,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { journalEventTypes, waitingRow } from "./harness/durableState.ts"
-import { spawnWaitChild } from "./harness/waitChild.ts"
+import { reapWaitChildren, spawnWaitChild } from "./harness/waitChild.ts"
 import { timerFiredStep } from "./harness/waitFlows.ts"
 
 const directory = mkdtempSync(join(tmpdir(), "smithers-e2e-case05-"))
-afterAll(() => rmSync(directory, { recursive: true, force: true }))
+afterAll(async () => {
+  // Reap first: a lingering host outlives an assertion that failed before its
+  // kill, and must not be left running against a directory that is going away.
+  await reapWaitChildren()
+  rmSync(directory, { recursive: true, force: true })
+})
 
 const timerMs = 4_000
 
