@@ -16,6 +16,16 @@ export interface TestDatabase {
   readonly close: () => void
 }
 
+export interface TestDatabaseOptions {
+  /**
+   * Awaited before every prepared statement runs, so a test can park one
+   * query and drive another while it waits. A parked statement has already
+   * bound its values and reads the database as it stands when it is released,
+   * which is how a test schedules an interleaving D1 really allows.
+   */
+  readonly beforeQuery?: (query: string) => Promise<void> | void
+}
+
 const migration = (name: string): Promise<string> =>
   readFile(fileURLToPath(new URL(`../migrations/${name}`, import.meta.url).href), "utf8")
 
@@ -26,15 +36,24 @@ const unsupported = (name: string): never => {
 /** The value kinds `node:sqlite` accepts as a bound parameter. */
 type BoundValue = null | number | bigint | string | Uint8Array
 
-const statementFor = (sqlite: DatabaseSync, query: string, values: ReadonlyArray<BoundValue>) => ({
-  bind: (...next: ReadonlyArray<BoundValue>) => statementFor(sqlite, query, next),
+const statementFor = (
+  sqlite: DatabaseSync,
+  query: string,
+  values: ReadonlyArray<BoundValue>,
+  beforeQuery: TestDatabaseOptions["beforeQuery"]
+) => ({
+  bind: (...next: ReadonlyArray<BoundValue>) => statementFor(sqlite, query, next, beforeQuery),
   first: async <Row>(): Promise<Row | null> => {
+    await beforeQuery?.(query)
     const rows = sqlite.prepare(query).all(...values) as ReadonlyArray<unknown> as ReadonlyArray<Row>
     return rows[0] ?? null
   },
-  all: async <Row>(): Promise<{ readonly results: ReadonlyArray<Row> }> => ({
-    results: sqlite.prepare(query).all(...values) as ReadonlyArray<unknown> as ReadonlyArray<Row>
-  }),
+  all: async <Row>(): Promise<{ readonly results: ReadonlyArray<Row> }> => {
+    await beforeQuery?.(query)
+    return {
+      results: sqlite.prepare(query).all(...values) as ReadonlyArray<unknown> as ReadonlyArray<Row>
+    }
+  },
   run: () => unsupported("run"),
   raw: () => unsupported("raw")
 })
@@ -42,12 +61,12 @@ const statementFor = (sqlite: DatabaseSync, query: string, values: ReadonlyArray
 /**
  * Opens an in-memory database with both shipped migrations applied.
  */
-export const makeTestDatabase = async (): Promise<TestDatabase> => {
+export const makeTestDatabase = async (options: TestDatabaseOptions = {}): Promise<TestDatabase> => {
   const sqlite = new DatabaseSync(":memory:")
   sqlite.exec(await migration("0001_initial.sql"))
   sqlite.exec(await migration("0002_bound_cache_rows.sql"))
   const database = {
-    prepare: (query: string) => statementFor(sqlite, query, []),
+    prepare: (query: string) => statementFor(sqlite, query, [], options.beforeQuery),
     batch: () => unsupported("batch"),
     exec: () => unsupported("exec"),
     dump: () => unsupported("dump"),

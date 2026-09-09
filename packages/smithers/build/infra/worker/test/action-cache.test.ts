@@ -18,14 +18,86 @@ interface StoredRow {
   readonly access_count: number
   readonly last_accessed_at: string
   readonly result_json: string
+  readonly entry_json: string
+  readonly created_at_ms: number | null
+  readonly recorded_run_id: string | null
+  readonly recorded_event_seq: number | null
 }
+
+interface ParkedQuery {
+  readonly query: string
+  readonly release: () => void
+}
+
+/**
+ * Parks the statements a test names so two publications meet at a chosen
+ * point. A held statement binds its values, waits, and then reads whatever
+ * the database holds when it is released, which is the interleaving the
+ * sequential API cannot express.
+ */
+const makeQueryGate = (): {
+  readonly beforeQuery: (query: string) => Promise<void> | void
+  readonly hold: (needle: string) => void
+  readonly waitFor: (needle: string) => Promise<ParkedQuery>
+  readonly ran: ReadonlyArray<string>
+} => {
+  const held: Array<string> = []
+  const parked: Array<ParkedQuery> = []
+  const ran: Array<string> = []
+  let arrived: (() => void) | undefined
+  return {
+    ran,
+    beforeQuery: (query) => {
+      ran.push(query)
+      if (!held.some((needle) => query.includes(needle))) return
+      return new Promise<void>((resolve) => {
+        parked.push({ query, release: resolve })
+        arrived?.()
+      })
+    },
+    hold: (needle) => {
+      held.push(needle)
+    },
+    waitFor: async (needle) => {
+      // A statement that never arrives is a test that no longer schedules what
+      // it claims to, so say so rather than waiting out the suite's timeout.
+      let expiry: ReturnType<typeof setTimeout> | undefined
+      const abandoned = new Promise<never>((_, reject) => {
+        expiry = setTimeout(() => reject(new Error(`no statement holding \`${needle}\` was parked`)), 2_000)
+      })
+      try {
+        for (;;) {
+          const index = parked.findIndex((entry) => entry.query.includes(needle))
+          if (index >= 0) {
+            const heldAt = held.indexOf(needle)
+            if (heldAt >= 0) held.splice(heldAt, 1)
+            return parked.splice(index, 1)[0]!
+          }
+          await Promise.race([
+            new Promise<void>((resolve) => {
+              arrived = resolve
+            }),
+            abandoned
+          ])
+        }
+      } finally {
+        clearTimeout(expiry)
+      }
+    }
+  }
+}
+
+const inserts = (gate: { readonly ran: ReadonlyArray<string> }): number =>
+  gate.ran.filter((query) => query.includes("INSERT INTO smithers_build_cache_entry")).length
 
 describe("D1 action cache", () => {
   let d1: TestDatabase
   let cache: ActionCache
+  let gate: ReturnType<typeof makeQueryGate>
 
   beforeEach(async () => {
-    d1 = await makeTestDatabase()
+    gate = makeQueryGate()
+    d1 = await makeTestDatabase({ beforeQuery: gate.beforeQuery })
     cache = makeActionCache(d1.database)
   })
 
@@ -36,7 +108,9 @@ describe("D1 action cache", () => {
   const row = (keyDigest: string): StoredRow | undefined =>
     d1.sqlite
       .prepare(
-        "SELECT access_count, last_accessed_at, result_json FROM smithers_build_cache_entry WHERE key_digest = ?"
+        `SELECT access_count, last_accessed_at, result_json, entry_json, created_at_ms, recorded_run_id,
+          recorded_event_seq
+        FROM smithers_build_cache_entry WHERE key_digest = ?`
       )
       .all(keyDigest)[0] as unknown as StoredRow | undefined
 
@@ -47,6 +121,72 @@ describe("D1 action cache", () => {
 
     // The first writer's original text survives every later publication.
     expect(await cache.get("key")).toBe("{\"result\":{\"exitOk\":true}}")
+  })
+
+  it("classifies concurrent publications against the writer that wins the row", async () => {
+    gate.hold("INSERT INTO smithers_build_cache_entry")
+    const winner = cache.put("key", publication({ body: "{\"winner\":true}", createdAtMs: 11 }))
+    const identical = cache.put("key", publication({ body: "{\"identical\":true}", recordedRunId: "run-2" }))
+    const divergent = cache.put(
+      "key",
+      publication({ body: "{\"divergent\":true}", resultJson: "{\"exitOk\":false}" })
+    )
+
+    // All three inserts are in flight; each is released in turn, so the second
+    // and third read a row the first has already committed.
+    ;(await gate.waitFor("INSERT INTO smithers_build_cache_entry")).release()
+    await expect(winner).resolves.toBe("inserted")
+    ;(await gate.waitFor("INSERT INTO smithers_build_cache_entry")).release()
+    await expect(identical).resolves.toBe("identical")
+    ;(await gate.waitFor("INSERT INTO smithers_build_cache_entry")).release()
+    await expect(divergent).resolves.toBe("conflict")
+
+    // The winner's bytes and provenance are what a later reader gets.
+    expect(await cache.get("key")).toBe("{\"winner\":true}")
+    expect(row("key")?.created_at_ms).toBe(11)
+    expect(row("key")?.recorded_run_id).toBe("run-1")
+    expect(row("key")?.recorded_event_seq).toBe(7)
+  })
+
+  it("republishes when the row it lost to is deleted before the discriminator read", async () => {
+    await cache.put("key", publication())
+    gate.hold("RETURNING result_json")
+    const republished = cache.put(
+      "key",
+      publication({ body: "{\"republished\":true}", recordedRunId: "run-2", recordedEventSeq: 9 })
+    )
+
+    // The losing insert has already conflicted; retention deletes the row
+    // underneath the read that would have classified it.
+    const classification = await gate.waitFor("RETURNING result_json")
+    expect(await cache.delete("key", null)).toBe(true)
+    classification.release()
+
+    await expect(republished).resolves.toBe("inserted")
+    expect(await cache.get("key")).toBe("{\"republished\":true}")
+    expect(row("key")?.recorded_run_id).toBe("run-2")
+    // One disappearance costs one extra insert, not the whole retry budget.
+    expect(inserts(gate)).toBe(3)
+  })
+
+  it("keeps a replacement a delete under the superseded fence arrives to remove", async () => {
+    await cache.put("key", publication())
+    gate.hold("recorded_run_id = ?")
+    const stale = cache.delete("key", { runId: "run-1", eventSeq: 7 })
+
+    // The fenced delete binds the old provenance, then the entry it named is
+    // evicted and republished while that statement waits.
+    const fenced = await gate.waitFor("recorded_run_id = ?")
+    expect(await cache.delete("key", null)).toBe(true)
+    await expect(
+      cache.put("key", publication({ body: "{\"replacement\":true}", recordedRunId: "run-2", recordedEventSeq: 9 }))
+    ).resolves.toBe("inserted")
+    fenced.release()
+
+    await expect(stale).resolves.toBe(false)
+    expect(await cache.get("key")).toBe("{\"replacement\":true}")
+    expect(row("key")?.recorded_run_id).toBe("run-2")
+    expect(row("key")?.recorded_event_seq).toBe(9)
   })
 
   it("stores a publication without provenance", async () => {

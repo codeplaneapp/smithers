@@ -8,14 +8,73 @@ const digestBytes = (digest: string): ArrayBuffer =>
 
 const object = (
   key: string,
-  options: { readonly checksum?: ArrayBuffer; readonly body?: ReadableStream }
+  options: { readonly checksum?: ArrayBuffer; readonly body?: ReadableStream; readonly size?: number }
 ): R2ObjectBody =>
   ({
     body: options.body ?? new Response("artifact").body!,
     checksums: options.checksum === undefined ? {} : { sha256: options.checksum },
     key,
-    size: 8
+    size: options.size ?? 8
   }) as unknown as R2ObjectBody
+
+const sha256 = (bytes: Uint8Array): ArrayBuffer =>
+  Uint8Array.from(createHash("sha256").update(bytes).digest()).buffer
+
+/** Bytes no accidental empty or text payload could stand in for. */
+const artifactBytes = Uint8Array.from([0, 255, 13, 10, 0, 34, 92, 128, 7, 200, 255, 1])
+const artifactDigest = createHash("sha256").update(artifactBytes).digest("hex")
+
+interface PutCall {
+  readonly key: string
+  readonly bytes: Uint8Array
+  readonly options: R2PutOptions | undefined
+}
+
+interface StoredObject {
+  readonly bytes: Uint8Array
+  readonly checksum: ArrayBuffer | undefined
+}
+
+/**
+ * A bucket that keeps the bytes it is handed and answers every read from
+ * them, so a test observes what the adapter published instead of a prebuilt
+ * reply. Like R2 it derives the object's SHA-256 from what it stored, so
+ * publishing the wrong bytes or the wrong key cannot verify afterwards.
+ *
+ * `stored` is writable so a test can seed the object a repair has to replace.
+ */
+const recordingBucket = (): {
+  readonly bucket: R2Bucket
+  readonly puts: ReadonlyArray<PutCall>
+  readonly stored: Map<string, StoredObject>
+} => {
+  const puts: Array<PutCall> = []
+  const stored = new Map<string, StoredObject>()
+  const objectFor = (key: string): R2ObjectBody | null => {
+    const entry = stored.get(key)
+    if (entry === undefined) return null
+    return object(key, {
+      body: new Response(entry.bytes).body!,
+      size: entry.bytes.byteLength,
+      ...(entry.checksum === undefined ? {} : { checksum: entry.checksum })
+    })
+  }
+  const bucket = {
+    get: async (key: string) => objectFor(key),
+    head: async (key: string) => objectFor(key),
+    put: async (key: string, body: Uint8Array, options?: R2PutOptions) => {
+      const bytes = Uint8Array.from(body)
+      puts.push({ key, bytes, options })
+      if (options?.onlyIf !== undefined && stored.has(key)) return null
+      stored.set(key, { bytes, checksum: sha256(bytes) })
+      return objectFor(key)
+    }
+  } as unknown as R2Bucket
+  return { bucket, puts, stored }
+}
+
+const readBody = async (body: BodyInit): Promise<ReadonlyArray<number>> =>
+  Array.from(new Uint8Array(await new Response(body).arrayBuffer()))
 
 describe("R2 content store", () => {
   let errors: ReturnType<typeof vi.spyOn>
@@ -182,16 +241,58 @@ describe("R2 content store", () => {
   })
 
   it("publishes a first insert and verifies what R2 stored", async () => {
-    const digest = digestOf("artifact")
-    const bytes = Uint8Array.from(new TextEncoder().encode("artifact"))
-    let puts = 0
-    const bucket = {
-      put: async () => (puts += 1, object(digest, { checksum: digestBytes(digest) })),
-      head: async () => null
-    } as unknown as R2Bucket
+    const { bucket, puts, stored } = recordingBucket()
+    const store = makeContentStore(bucket)
 
-    await expect(makeContentStore(bucket).put(digest, bytes)).resolves.toBe("inserted")
-    expect(puts).toBe(1)
+    await expect(store.put(artifactDigest, artifactBytes)).resolves.toBe("inserted")
+
+    // What reaches the bucket is the contract: the content address as the key,
+    // the request bytes unchanged, the address as the provider checksum, and
+    // the conditional header that makes the first writer win.
+    expect(puts).toHaveLength(1)
+    expect(puts[0]?.key).toBe(artifactDigest)
+    expect(Array.from(puts[0]?.bytes ?? [])).toEqual(Array.from(artifactBytes))
+    expect(Array.from(puts[0]?.options?.sha256 as Uint8Array)).toEqual(
+      Array.from(new Uint8Array(digestBytes(artifactDigest)))
+    )
+    expect((puts[0]?.options?.onlyIf as Headers).get("if-none-match")).toBe("*")
+    expect(Array.from(stored.get(artifactDigest)?.bytes ?? [])).toEqual(Array.from(artifactBytes))
+
+    await expect(store.has(artifactDigest)).resolves.toBe(true)
+    expect(await readBody((await store.get(artifactDigest))!.body)).toEqual(Array.from(artifactBytes))
+  })
+
+  it("leaves an already-published object exactly as the first writer stored it", async () => {
+    const { bucket, puts, stored } = recordingBucket()
+    stored.set(artifactDigest, { bytes: artifactBytes, checksum: sha256(artifactBytes) })
+    const store = makeContentStore(bucket)
+
+    await expect(store.put(artifactDigest, artifactBytes)).resolves.toBe("present")
+
+    // Only the losing conditional attempt reaches R2; nothing rewrites the row.
+    expect(puts).toHaveLength(1)
+    expect(puts[0]?.options?.onlyIf).toBeDefined()
+    expect(Array.from(stored.get(artifactDigest)?.bytes ?? [])).toEqual(Array.from(artifactBytes))
+    expect(await readBody((await store.get(artifactDigest))!.body)).toEqual(Array.from(artifactBytes))
+  })
+
+  it("repairs an unverifiable object with the published bytes and then serves them", async () => {
+    const { bucket, puts, stored } = recordingBucket()
+    stored.set(artifactDigest, { bytes: Uint8Array.from([1, 2, 3]), checksum: undefined })
+    const store = makeContentStore(bucket)
+
+    await expect(store.put(artifactDigest, artifactBytes)).resolves.toBe("inserted")
+
+    expect(puts.map((call) => call.key)).toEqual([artifactDigest, artifactDigest])
+    expect(puts[0]?.options?.onlyIf).toBeDefined()
+    expect(puts[1]?.options?.onlyIf).toBeUndefined()
+    expect(Array.from(puts[1]?.bytes ?? [])).toEqual(Array.from(artifactBytes))
+    expect(Array.from(puts[1]?.options?.sha256 as Uint8Array)).toEqual(
+      Array.from(new Uint8Array(digestBytes(artifactDigest)))
+    )
+    // The legacy bytes are gone, and the digest now reads back as itself.
+    expect(Array.from(stored.get(artifactDigest)?.bytes ?? [])).toEqual(Array.from(artifactBytes))
+    expect(await readBody((await store.get(artifactDigest))!.body)).toEqual(Array.from(artifactBytes))
   })
 
   it("gives up when the conditional publication keeps losing to an object it cannot find", async () => {
