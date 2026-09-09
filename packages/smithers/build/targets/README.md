@@ -4,7 +4,9 @@
 
 `@smthrs/targets` defines the pure authoring surface used by `PACKAGE.ts` files.
 Target calls perform no filesystem reads and start no processes. They return
-Flow declarations with planner metadata attached.
+opaque `Target` declarations with planner metadata. Execute them through the
+package executor in `@smthrs/build-cli`. A host-owned Flow can explicitly lower
+an action-backed declaration with `Target.plan(target)`.
 
 The package exports one named namespace, `Smithers`, the way `effect` exports
 `Effect`. A `PACKAGE.ts` file imports it once and reaches the whole catalog
@@ -26,10 +28,9 @@ in `Shell`. [`docs/rules.md`](./docs/rules.md) lists the route of every rule in
 the catalog. Read it there rather than from a list written by hand here, which
 is how this paragraph used to be wrong about ten rules at once.
 
-A package-executor rule's Flow body is `Target.notImplemented`, so running one
-under a bare Flow runtime fails with `smithers-build/NotImplemented` rather than
-doing nothing quietly. That is the no-fake-green rule, not a gap: the rule runs
-under `smithers-build`.
+A package-only rule lowers to `Target.notImplemented`, so executing that plan
+under a bare Flow runtime fails with `smithers-build/NotImplemented`. Execute
+these targets through the package executor.
 
 A workspace declares its toolchain once and passes it to everything that runs a
 tool. `Smithers.Runtime.Node` and `.Bun` declare a runtime;
@@ -223,13 +224,18 @@ The planner expands the set at plan time, keys the consuming target on the
 manifests it found and their contents, and renders one cargo command per
 selected crate.
 
-`Cargo.Fmt`, `Cargo.Clippy`, and `Cargo.Test` are also the BUILD-era check
-constructors the legacy `Smithers.CargoLint` and `Smithers.CargoTest` targets
-take as an attr. The crate selector tells the two apart: every build-system
-declaration names one and no BUILD-era call ever passes one, so
-`Smithers.Cargo.Clippy()` is still a check value and
-`Smithers.Cargo.Clippy({ workspace: true })` is a target. A repository moving
-from `PACKAGE.ts` to `PACKAGE.ts` does not rename its cargo gates.
+`Cargo.Clippy` and `Cargo.Test` construct targets with exactly one crate
+selector: `workspace: true`, `package: "<name>"`, or `crates: <set>`.
+
+```ts
+const lintWorkspace = S.Cargo.Clippy({ workspace: true })
+const testPackage = S.Cargo.Test({ package: "aomi-sdk" })
+const lintApps = S.Cargo.Clippy({ crates: allApps })
+```
+
+`Cargo.Fmt` constructs a formatting target with an attrs object. It accepts
+at most one of `workspace: true` or `crates: <set>`; omitting both uses the
+current workspace.
 
 The BUILD-era `RustToolchain.Pinned` declaration follows the same content rule:
 `pin` defaults to `S.file("//rust-toolchain.toml")`, and Cargo targets digest it

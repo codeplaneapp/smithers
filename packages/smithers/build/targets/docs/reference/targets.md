@@ -49,7 +49,7 @@ ESM/CommonJS distribution, and `effect` is an exact peer at `4.0.0-rc.112`.
 
 `Smithers.ts` exports 145 names. This section gives headings to the input constructors, the workspace declarations, the macros, and the rule-family namespaces a declaration reaches first, and lists the other 124 exports in one table at the end of the section.
 
-A catalog rule is a `Target.Definition`. Calling it with its attrs object returns a `Target`, and each `Signature` row below names the attrs schema its module declares.
+A catalog rule is a `Target.Definition`. Calling it with its attrs object returns an opaque `Target` declaration with planner metadata. Each `Signature` row below names the attrs schema its module declares. Execute targets through the package executor in `@smthrs/build-cli`. A host-owned Flow can explicitly lower an action-backed declaration with `Target.plan(target)`; package-only rules lower to a typed refusal.
 
 ### `Smithers.file`
 
@@ -154,7 +154,7 @@ The manifest form reads `packageManager: "pnpm@<version>"`. An explicit `version
 - **Type:** the `Cargo` module
 - **Since:** `0.1.0`
 
-The cargo surface: `Cargo.Fetch`, `Cargo.Build`, `Cargo.Test`, `Cargo.Nextest`, `Cargo.Clippy`, `Cargo.Fmt`, `Cargo.Doc`, `Cargo.Deny`, and the `Cargo.AppSet` crate set. Each rule names its crates with exactly one selector, `workspace: true`, `package: "<name>"`, or `crates: <set>`. `Cargo.Fetch` is the one network-enabled cargo rule: its first `outDirs` entry becomes the `CARGO_HOME` every dependent reads. `Cargo.Fmt`, `Cargo.Clippy`, and `Cargo.Test` called without a selector are check values a legacy `CargoLint` or `CargoTest` target takes as an attr, and called with one they are targets.
+The cargo surface: `Cargo.Fetch`, `Cargo.Build`, `Cargo.Test`, `Cargo.Nextest`, `Cargo.Clippy`, `Cargo.Fmt`, `Cargo.Doc`, `Cargo.Deny`, and the `Cargo.AppSet` crate set. `Cargo.Build`, `Cargo.Test`, `Cargo.Nextest`, `Cargo.Clippy`, and `Cargo.Doc` construct targets with exactly one selector: `workspace: true`, `package: "<name>"`, or `crates: <set>`. `Cargo.Fmt` takes an attrs object with at most one of `workspace: true` or `crates: <set>`; omitting both uses the current workspace. `Cargo.Fetch` accepts at most one of `manifest` or `crates`. It is the one network-enabled cargo rule: its first `outDirs` entry becomes the `CARGO_HOME` every dependent reads.
 
 ### `Smithers.Shell`
 
@@ -444,7 +444,7 @@ Run `smthrs test //packages/core:test` for the tests and
 
 ## See also
 
-- [@smthrs/flow](/api/flow), the package whose declarations every rule returns
+- [@smthrs/flow](/api/flow), the host-owned Flow runtime for explicitly lowered target plans
 - [Filegroup rule](/docs/reference/targets/filegroup/)
 - [Agent.Diff rule](/docs/reference/targets/agent-diff/)
 - [Flows, actions, and plans](/docs/concepts/flows-actions-plans/)

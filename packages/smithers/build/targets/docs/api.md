@@ -11,8 +11,10 @@ and defaults read from source, see
 `@smthrs/targets` is the authoring surface a `PACKAGE.ts` or `WORKSPACE.ts`
 file writes against. Nothing here reads the filesystem or starts a process. A
 target call validates its attrs, records its declared inputs and dependencies,
-and returns a Flow with planner metadata attached. Execution belongs to
-[`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli).
+and returns an opaque `Target` declaration with planner metadata. The package executor in
+[`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli)
+executes targets. A host-owned Flow can explicitly lower an action-backed
+declaration with `Target.plan(target)`.
 
 ## Construction
 
@@ -172,13 +174,6 @@ ordinary work first and runs each exclusive target alone, even with a larger
 one invocation; independent invocations still need separate machines or external
 coordination. A wildcard whose ordinary target depends on an exclusive target
 refuses with an opt-in diagnostic instead of silently adding the fault suite.
-
-`DurableIdentityGuard`, `DocsReferenceSync`, and `JsdocTruthfulness` are the
-model-review macros. Each one bakes a rubric, the prompt framing, the engine,
-the model tier, the batch size, and the failure threshold into an `LlmLint`,
-and anchors its globs and its diff to the `cwd` the declaring package passes,
-so a package opts into a review by declaring one target rather than by being
-named in a list somewhere else.
 
 - [Catalog rules](./rules.md), the inventory of every rule with its verbs,
   caching, and route.
