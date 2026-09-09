@@ -52,7 +52,7 @@ const withRelay = async (
   script: {
     readonly cloudToken?: (call: RelayCall, attempt: number) => Response | undefined
     readonly provision?: (call: RelayCall, attempt: number) => Response | undefined
-    readonly gateway?: (call: RelayCall, attempt: number) => Response | undefined
+    readonly gateway?: (call: RelayCall, attempt: number, signal: AbortSignal) => Response | undefined | Promise<Response>
   },
   run: (calls: RelayCall[]) => Promise<void>
 ): Promise<void> => {
@@ -98,7 +98,7 @@ const withRelay = async (
     }
     if (url.pathname.startsWith("/api/gateways/")) {
       attempts.gateway += 1
-      return script.gateway?.(call, attempts.gateway) ?? json(200, { ok: true, apiVersion: "v1", payload: [] })
+      return script.gateway?.(call, attempts.gateway, request.signal) ?? json(200, { ok: true, apiVersion: "v1", payload: [] })
     }
     if (url.hostname === "identity.test") {
       // The session probe every workflow route gates on.
@@ -449,6 +449,56 @@ describe("wave 11 — provision-or-resume (§5)", () => {
     )
   })
 
+  for (const failure of ["rejected fetch", "stalled headers"] as const) {
+    for (const renewalFails of [false, true]) {
+      test(`a non-replayable ${failure} is sent once even when renewal ${renewalFails ? "fails" : "succeeds"}`, async () => {
+        await withRelay(
+          {
+            provision: (_call, attempt) => {
+              if (attempt === 2 && renewalFails) return json(500, { error: "no_capacity" })
+              return json(200, {
+                base_url: `https://api.smithers-cloud.test/api/gateways/gw-${attempt}`,
+                token: `${GATEWAY_TOKEN}-${attempt}`,
+                expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+                gateway_id: `gw-${attempt}`
+              })
+            },
+            gateway: (_call, attempt, signal) => {
+              if (attempt > 1) return json(200, { ok: true, payload: [] })
+              if (failure === "rejected fetch") return Promise.reject(new Error("Network connection lost."))
+              return new Promise<Response>((_resolve, reject) => {
+                signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+              })
+            }
+          },
+          async (calls) => {
+            const call = await callGateway(env({ UPSTREAM_TIMEOUT_MS: "150" }), "will", "will/mvp", "/rpc", {
+              method: "POST",
+              body: { workflow: "create-workflow", input: { prompt: "x" } },
+              replayable: false
+            })
+            expect(calls.filter((entry) => entry.url.endsWith("/rpc"))).toHaveLength(1)
+            expect(call.status).toBe("unknown_outcome")
+            expect("detail" in call && call.detail).toContain("may have been accepted")
+            expect("detail" in call && call.detail).toContain(
+              failure === "rejected fetch" ? "Network connection lost." : "did not answer within"
+            )
+            expect(calls.filter((entry) => entry.url.endsWith("/gateway"))).toHaveLength(2)
+            if (!renewalFails) {
+              const next = await callGateway(env(), "will", "will/mvp", "/rpc", { method: "POST", body: {} })
+              expect(next.status).toBe("ok")
+              const rpcCalls = calls.filter((entry) => entry.url.endsWith("/rpc"))
+              expect(rpcCalls).toHaveLength(2)
+              expect(rpcCalls[1]?.url).toContain("/api/gateways/gw-2/")
+              expect(rpcCalls[1]?.authorization).toBe(`Bearer ${GATEWAY_TOKEN}-2`)
+              expect(calls.filter((entry) => entry.url.endsWith("/gateway"))).toHaveLength(2)
+            }
+          }
+        )
+      })
+    }
+  }
+
   test("a gateway that stays unreachable states why, once, and stops", async () => {
     await withRelay(
       {
@@ -469,7 +519,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
     )
   })
 
-  test("a 401 from the relay re-provisions and retries the call once with the fresh token", async () => {
+  test.each([true, false])("a 401 re-provisions and retries once with fresh credentials (replayable: %s)", async (replayable) => {
     await withRelay(
       {
         provision: (_call, attempt) =>
@@ -487,7 +537,8 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       async (calls) => {
         const call = await callGateway(env(), "will", "will/mvp", "/rpc", {
           method: "POST",
-          body: {}
+          body: {},
+          replayable
         })
         expect(call.status).toBe("ok")
         if (call.status !== "ok") return

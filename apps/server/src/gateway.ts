@@ -531,6 +531,7 @@ export const GATEWAY_RELAY_PATHS: ReadonlyArray<string> = ["/rpc", "/projections
 
 export type GatewayCallOutcome =
   | { readonly status: "ok"; readonly response: Response }
+  | { readonly status: "unknown_outcome"; readonly detail: string }
   | { readonly status: "provisioning"; readonly detail: string }
   | { readonly status: "no_capacity"; readonly detail: string }
   | { readonly status: "no_cloud_token"; readonly detail: string }
@@ -561,7 +562,7 @@ export const callGateway = async (
     /** A body forwarded byte for byte, for the RPC mounts. */
     readonly text?: string
     readonly headers?: Record<string, string>
-    /** Whether this call may be replayed onto a re-provisioned gateway. */
+    /** Whether this call may be replayed after an ambiguous transport or tunnel failure. */
     readonly replayable?: boolean
     /**
      * Whether this call may provision or resume a box (the default). `false`
@@ -647,6 +648,17 @@ export const callGateway = async (
     }
     if (response !== undefined) await response.body?.cancel()
     const renewed = await ensureGateway(env, login, repo, true)
+    // Losing the headers does not establish whether the command was accepted.
+    // Renew for subsequent callers, but preserve that uncertainty even if
+    // renewal fails: its outcome says nothing about the original command.
+    if (response === undefined && init.replayable === false) {
+      return {
+        status: "unknown_outcome",
+        detail: `The workspace command may have been accepted, but its response was lost. It was not replayed${
+          reason === undefined ? "." : `: ${reason}`
+        }`
+      }
+    }
     if (renewed.status !== "ready") return renewed
     /*
      * A tunnel failure can also mean the engine took the write and only the

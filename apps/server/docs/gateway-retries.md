@@ -1,0 +1,18 @@
+# Gateway retries
+
+`callGateway` defaults to replayable calls. A transport rejection, headers
+timeout, relay HTTP 401, or tunnel HTTP 502/503/504 can refresh the gateway
+record and retry once. Fresh records suppress repeated tunnel reprovisioning.
+
+`replayable: false` forbids retrying after a transport rejection or headers
+timeout. The command may have been accepted. The seam attempts to refresh the
+record for subsequent callers, then returns `status: "unknown_outcome"` with
+a detail explaining that the command was not replayed. A failed refresh does
+not replace this result with a provisioning error. The workflow RPC route
+surfaces it as HTTP 502 with `status: "error"` and the detail as `message`.
+
+Non-replayable calls also retain the tunnel-failure no-retry guard. HTTP 401
+can retry once because the relay rejected the credentials. Run calls use
+`replayable: false`; a lost response does not establish that a run failed.
+
+`provision: false` calls send at most once and never refresh the record.
