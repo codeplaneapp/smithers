@@ -63,6 +63,48 @@ const tableColumn = (markdown: string, heading: string): ReadonlyArray<string> =
 }
 
 describe("packages/smithers/build prose", () => {
+  it("describes target discovery through the named Package map", () => {
+    const loader = read("build-cli/src/PackageLoader.ts")
+    expect(loader).toContain("\"naked_target_export\"")
+    expect(loader).toContain("\"package_export_missing\"")
+    const page = read("docs/concepts/targets.md")
+    expect(page).toContain("export const Package = Smithers.Package({")
+    expect(page).toContain("//<packagePath>:<targetKey>")
+    expect(page).not.toContain("//<packagePath>:<exportName>")
+    expect(page).not.toContain("Everything else is ignored")
+  })
+
+  it("does not export naked targets in reference examples", () => {
+    // These constructors return shared configuration or manifest declarations,
+    // not targets. They may remain module exports alongside Package.
+    const declarations = new Set([
+      "Package",
+      "Runtime.Node",
+      "PackageManager.Pnpm",
+      "RustToolchain.Pinned",
+      "PackageJsonTemplate.make",
+      "PackageJson"
+    ])
+    const naked: Array<string> = []
+    for (const file of proseFiles().filter((file) => file.startsWith("docs/reference/targets/"))) {
+      for (const fence of read(file).matchAll(/```ts[^\n]*\n([\s\S]*?)```/g)) {
+        for (const exported of fence[1]!.matchAll(/export\s+const\s+(\w+)\s*=\s*(?:Smithers|S)\.([\w.]+)\s*\(/g)) {
+          if (!declarations.has(exported[2]!)) naked.push(`${file}: ${exported[1]}`)
+        }
+      }
+    }
+    expect(naked, "targets must be declared in the exported Package map").toEqual([])
+  })
+
+  it("documents the opt-in cache default used by Target.make", () => {
+    const source = read("targets/src/Target.ts")
+    const defaultValue = source.match(/options\.cache \?\? (true|false)/)?.[1]
+    expect(defaultValue).toBe("false")
+    const page = read("docs/concepts/targets.md")
+    expect(page).toMatch(new RegExp("`cacheable` is resolved:[\\s\\S]*?defaulting\\s+to `" + defaultValue + "`"))
+    expect(page).toContain("../workspace/caching.md#cacheability")
+  })
+
   it("names only managers a declaration can select", () => {
     const declarable = new Set(PackageManager.Name.literals.map((name) => name.toLowerCase()))
     expect(declarable).toEqual(new Set(["pnpm", "bun"]))

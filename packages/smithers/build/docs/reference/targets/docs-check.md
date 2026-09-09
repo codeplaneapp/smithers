@@ -11,7 +11,7 @@ import { Smithers } from "@smthrs/targets"
 
 const references = Smithers.Filegroup({ srcs: [Smithers.glob("//apps/site/references/**")] })
 
-export const fresh = Smithers.Docs.Check({
+const fresh = Smithers.Docs.Check({
   stamp: Smithers.file("//apps/site/pages/intro/stamp.json"),
   output: Smithers.file("//apps/site/src/content/docs/docs/intro.mdx"),
   inputs: [
@@ -21,6 +21,10 @@ export const fresh = Smithers.Docs.Check({
     references
   ],
   producer: "claude-opus-5 prompts/tutorial.md"
+})
+
+export const Package = Smithers.Package({
+  targets: { fresh }
 })
 ```
 

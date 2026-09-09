@@ -8,13 +8,17 @@ Runs a long-lived development or watch command.
 ```ts
 import { Smithers } from "@smthrs/targets"
 
-export const dev = Smithers.Dev({
+const dev = Smithers.Dev({
   command: "pnpm",
   args: ["exec", "vite", "dev"],
   inputs: [Smithers.glob("src/**/*.ts")],
   deps: [lib],
   cwd: "packages/web",
   readyWhen: null
+})
+
+export const Package = Smithers.Package({
+  targets: { dev }
 })
 ```
 

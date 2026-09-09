@@ -9,7 +9,7 @@ Runs a non-watch `vitest run` over a declared test set.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const test = Smithers.Vitest({
+const test = Smithers.Vitest({
   packageManager,
   tests: [Smithers.glob("test/**/*.test.ts")],
   sources: [Smithers.glob("src/**/*.ts")],
@@ -18,6 +18,10 @@ export const test = Smithers.Vitest({
   environment: "node",
   passWithNoTests: false,
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { test }
 })
 ```
 

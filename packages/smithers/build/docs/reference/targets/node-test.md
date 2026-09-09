@@ -18,7 +18,7 @@ import { Smithers } from "@smthrs/targets"
 const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 
 // node --test scripts/pack-release.test.mjs
-export const packManifest = Smithers.NodeTest({
+const packManifest = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/pack-release.test.mjs")]),
   srcs: [Smithers.glob("//scripts/**/*.mjs")],
@@ -26,11 +26,15 @@ export const packManifest = Smithers.NodeTest({
 })
 
 // node scripts/smoke-release.mjs dist/release-packs
-export const releaseSmoke = Smithers.NodeTest({
+const releaseSmoke = Smithers.NodeTest({
   runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/smoke-release.mjs"), ["dist/release-packs"]),
   srcs: [Smithers.glob("//scripts/**/*.mjs")],
   deps: [releasePack]
+})
+
+export const Package = Smithers.Package({
+  targets: { packManifest, releaseSmoke }
 })
 ```
 

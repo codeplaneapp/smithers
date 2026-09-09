@@ -10,7 +10,7 @@ Emits TypeScript declarations with `tsc --emitDeclarationOnly` or
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const types = Smithers.DtsBuild({
+const types = Smithers.DtsBuild({
   packageManager,
   srcs: [Smithers.glob("src/**/*.ts")],
   entries: [Smithers.file("src/index.ts")],
@@ -19,6 +19,10 @@ export const types = Smithers.DtsBuild({
   tool: { name: "tsc", declarationMap: true },
   outDir: "dist",
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { types }
 })
 ```
 

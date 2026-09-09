@@ -9,7 +9,7 @@ Checks missing, unused, and undeclared dependencies with knip or depcheck.
 import { Smithers } from "@smthrs/targets"
 import { packageManager, runtime } from "../../PACKAGE.ts"
 
-export const dependencyPolicy = Smithers.DepsLint({
+const dependencyPolicy = Smithers.DepsLint({
   runtime,
   packageManager,
   packageJson: Smithers.file("package.json"),
@@ -19,6 +19,10 @@ export const dependencyPolicy = Smithers.DepsLint({
   ignoreDependencies: ["@effect/platform-node"],
   ignoreBinaries: [],
   cwd: "packages/app"
+})
+
+export const Package = Smithers.Package({
+  targets: { dependencyPolicy }
 })
 ```
 

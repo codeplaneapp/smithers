@@ -9,14 +9,18 @@ of repeating its globs. It follows Bazel's `filegroup`.
 ```ts
 import { Smithers } from "@smthrs/targets"
 
-export const protos = Smithers.Filegroup({
+const protos = Smithers.Filegroup({
   srcs: [Smithers.glob("proto/**/*.proto")],
   cwd: "packages/wire"
 })
 
-export const wireInputs = Smithers.Filegroup({
+const wireInputs = Smithers.Filegroup({
   srcs: [Smithers.file("schema.json"), protos],
   cwd: "packages/wire"
+})
+
+export const Package = Smithers.Package({
+  targets: { protos, wireInputs }
 })
 ```
 

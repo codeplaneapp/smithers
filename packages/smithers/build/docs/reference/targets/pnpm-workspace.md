@@ -11,11 +11,15 @@ import { Smithers } from "@smthrs/targets"
 const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
 
-export const workspace = Smithers.PnpmWorkspace({
+const workspace = Smithers.PnpmWorkspace({
   packageManager,
   packages: ["packages/*", "apps/*"],
   allowBuilds: { esbuild: false, sharp: false },
   linkWorkspacePackages: true
+})
+
+export const Package = Smithers.Package({
+  targets: { workspace }
 })
 ```
 

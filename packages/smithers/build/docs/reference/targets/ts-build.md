@@ -10,7 +10,7 @@ Builds a JavaScript distribution for a TypeScript package with `tsc -p` or
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const lib = Smithers.TsBuild({
+const lib = Smithers.TsBuild({
   packageManager,
   srcs: [Smithers.glob("src/**/*.ts")],
   entries: [Smithers.file("src/index.ts")],
@@ -20,6 +20,10 @@ export const lib = Smithers.TsBuild({
   format: "dual",
   outDir: "dist",
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { lib }
 })
 ```
 

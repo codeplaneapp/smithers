@@ -15,7 +15,7 @@ const codeBlocks = Smithers.Markdown.CodeBlocks({
   lang: ["ts", "sh"]
 })
 
-export const flowReference = Smithers.Docs.Page({
+const flowReference = Smithers.Docs.Page({
   agent: Smithers.Agents.default,
   brief,
   prompt: Smithers.file("prompts/reference.md"),
@@ -24,6 +24,10 @@ export const flowReference = Smithers.Docs.Page({
   output: "src/content/docs/docs/reference/packages/flow.mdx",
   gates: [codeBlocks],
   maxRounds: 3
+})
+
+export const Package = Smithers.Package({
+  targets: { flowReference }
 })
 ```
 

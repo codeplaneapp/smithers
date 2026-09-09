@@ -9,12 +9,16 @@ Deletes explicitly declared generated paths.
 import { Smithers } from "@smthrs/targets"
 import { runtime } from "../../PACKAGE.ts"
 
-export const clean = Smithers.Clean({
+const clean = Smithers.Clean({
   runtime,
   paths: ["dist", "coverage", "*.tsbuildinfo"],
   deps: [],
   includeNodeModules: false,
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { clean }
 })
 ```
 

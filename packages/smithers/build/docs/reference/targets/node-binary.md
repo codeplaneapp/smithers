@@ -17,12 +17,16 @@ import { Smithers } from "@smthrs/targets"
 const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 
 // node scripts/pack-release.mjs dist/release-packs
-export const releasePack = Smithers.NodeBinary({
+const releasePack = Smithers.NodeBinary({
   runtime,
   entry: Smithers.file("//scripts/pack-release.mjs"),
   args: ["dist/release-packs"],
   srcs: [Smithers.glob("//scripts/**/*.mjs")],
   deps: []
+})
+
+export const Package = Smithers.Package({
+  targets: { releasePack }
 })
 ```
 

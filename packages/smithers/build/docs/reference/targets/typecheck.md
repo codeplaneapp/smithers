@@ -9,7 +9,7 @@ Checks a package with `tsc --noEmit` or TypeScript build mode.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const typecheck = Smithers.Typecheck({
+const typecheck = Smithers.Typecheck({
   packageManager,
   srcs: [Smithers.glob("src/**/*.ts"), Smithers.glob("test/**/*.ts")],
   deps: [],
@@ -17,6 +17,10 @@ export const typecheck = Smithers.Typecheck({
   buildMode: false,
   incremental: false,
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { typecheck }
 })
 ```
 

@@ -18,14 +18,18 @@ import { Smithers } from "@smthrs/targets"
 const page = (name: string) => Smithers.file(`docs/tutorials/${name}.md`)
 
 // Every `ts` fence on the page compiles.
-export const firstFlow = Smithers.Markdown.CodeBlocks({ file: page("first-flow"), lang: ["ts"] })
+const firstFlow = Smithers.Markdown.CodeBlocks({ file: page("first-flow"), lang: ["ts"] })
 
 // A page that continues the first tutorial's project: its fences import
 // `./durable-layer.ts`, a file the first page's titled fences declare.
-export const crashAndResume = Smithers.Markdown.CodeBlocks({
+const crashAndResume = Smithers.Markdown.CodeBlocks({
   file: page("crash-and-resume"),
   lang: ["ts"],
   context: [page("first-flow")]
+})
+
+export const Package = Smithers.Package({
+  targets: { firstFlow, crashAndResume }
 })
 ```
 

@@ -8,7 +8,7 @@ Generates and drift-checks a `tsconfig.json`.
 ```ts
 import { Smithers } from "@smthrs/targets"
 
-export const tsconfig = Smithers.Tsconfig({
+const tsconfig = Smithers.Tsconfig({
   extends: Smithers.file("tsconfig.base.json"),
   compilerOptions: {
     noEmit: true,
@@ -17,6 +17,10 @@ export const tsconfig = Smithers.Tsconfig({
   },
   include: ["packages/*/src/**/*"],
   exclude: ["**/dist/**"]
+})
+
+export const Package = Smithers.Package({
+  targets: { tsconfig }
 })
 ```
 

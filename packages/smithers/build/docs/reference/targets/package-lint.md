@@ -10,7 +10,7 @@ packed tarball's types with arethetypeswrong.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const packageLint = Smithers.PackageLint({
+const packageLint = Smithers.PackageLint({
   packageManager,
   packageJson: Smithers.file("package.json"),
   artifacts: [Smithers.glob("dist/**/*")],
@@ -19,6 +19,10 @@ export const packageLint = Smithers.PackageLint({
   pack: true,
   attw: true,
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { packageLint }
 })
 ```
 

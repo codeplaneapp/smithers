@@ -65,7 +65,7 @@ Calling a target is pure. In order:
 4. The declaration is constructed and metadata attached. Dependencies and inputs are
    deduplicated, and `kinds` is deduplicated too.
 5. `cacheable` is resolved: a boolean, or the result of `cache(attrs)`, defaulting
-   to `true`.
+   to `false`. See the [cache opt-in contract](../workspace/caching.md#cacheability).
 6. `sourceFile` is captured by scanning the construction stack for a `PACKAGE.ts`
    frame.
 
@@ -127,23 +127,37 @@ attrs to the flow.
 
 ## Export discovery
 
-A target becomes addressable when a `PACKAGE.ts` file exports it under a name.
-Discovery walks the module namespace in ascending export-name order and sorts
-each export into one of three buckets:
+A `PACKAGE.ts` file must export exactly one `Smithers.Package` declaration named
+`Package`. Its `targets` map makes targets addressable; map keys, not module
+export names, determine labels.
 
-| Value                           | Effect                                          |
-| ------------------------------- | ----------------------------------------------- |
-| A target                        | Registered under `//<packagePath>:<exportName>` |
-| A `PackageDefaults` declaration | Recorded with the declaring package path        |
-| A `Workspace` declaration       | Read by configuration resolution                |
+```ts
+import { Smithers } from "@smthrs/targets"
 
-Everything else is ignored, including a `file()` value exported for other
-`PACKAGE.ts` files to import.
+const sources = Smithers.Filegroup({ srcs: [Smithers.glob("src/**/*.ts")] })
 
-Exporting one target value under two names fails with
-`one target value is exported under both <a> and <b>`. A target call is what
-creates a target, so two calls with identical attributes produce two distinct
-values and two distinct labels.
+export const Package = Smithers.Package({
+  targets: { sources }
+})
+```
+
+Discovery reads the map keys in ascending order and registers each target as
+`//<packagePath>:<targetKey>`. For example, the declaration above in
+`packages/greeter/PACKAGE.ts` registers `//packages/greeter:sources`. Another
+package can import `Package` and refer to `Package.sources`.
+
+A top-level target export fails with `naked_target_export`, even when the same
+target is also in the map. A missing `Package` export fails with
+`package_export_missing`; a Package declaration exported under another name
+fails with `invalid_package_export`.
+
+Shared non-target values, such as runtime and package-manager declarations or
+`file()` inputs, may remain named exports. They do not acquire target labels
+from those exports. Workspace configuration belongs in `WORKSPACE.ts`.
+
+Listing the same target value under two map keys fails with
+`target_multiple_labels`. Use `Smithers.Alias` for a second name, or make two
+separate target calls to create distinct values and labels.
 
 ## Success and error channels
 

@@ -12,7 +12,11 @@ const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
 const workspace = Smithers.pnpmWorkspace("//pnpm-workspace.yaml")
 
-export const lockfile = Smithers.Lockfile({ packageManager, manifests: [workspace] })
+const lockfile = Smithers.Lockfile({ packageManager, manifests: [workspace] })
+
+export const Package = Smithers.Package({
+  targets: { lockfile }
+})
 ```
 
 A lockfile is a build output: derived, deterministic given the manifests and

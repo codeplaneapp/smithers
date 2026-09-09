@@ -9,13 +9,17 @@ Checks formatting with `dprint check`, or rewrites it with `dprint fmt`.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const fmt = Smithers.Dprint({
+const fmt = Smithers.Dprint({
   packageManager,
   sources: [Smithers.glob("src/**/*.ts"), Smithers.glob("test/**/*.ts")],
   deps: [],
   config: Smithers.file("dprint.json"),
   fix: false,
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { fmt }
 })
 ```
 

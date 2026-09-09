@@ -9,7 +9,7 @@ This is the deliberate escape hatch.
 ```ts
 import { Smithers } from "@smthrs/targets"
 
-export const nativeLib = Smithers.ToolBuild({
+const nativeLib = Smithers.ToolBuild({
   tool: "cargo",
   command: "cargo",
   args: ["build", "--release"],
@@ -19,6 +19,10 @@ export const nativeLib = Smithers.ToolBuild({
   env: { CARGO_TERM_COLOR: "never" },
   cache: true,
   cwd: "packages/native"
+})
+
+export const Package = Smithers.Package({
+  targets: { nativeLib }
 })
 ```
 

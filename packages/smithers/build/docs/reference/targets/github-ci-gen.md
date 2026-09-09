@@ -24,7 +24,7 @@ import { Smithers } from "@smthrs/targets"
 export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
 
-export const ci = Smithers.GithubCiGen({
+const ci = Smithers.GithubCiGen({
   packageManager,
   workflowName: "CI",
   pushBranches: ["main"],
@@ -50,6 +50,10 @@ export const ci = Smithers.GithubCiGen({
   ],
   output: ".github/workflows/ci.yml",
   mode: "check"
+})
+
+export const Package = Smithers.Package({
+  targets: { ci }
 })
 ```
 

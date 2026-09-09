@@ -20,7 +20,7 @@ const srcs = [
 ]
 
 // cargo fmt --check
-export const cargoFmt = Smithers.CargoLint({
+const cargoFmt = Smithers.CargoLint({
   toolchain: rustToolchain,
   check: Smithers.Cargo.Fmt(),
   srcs,
@@ -28,7 +28,7 @@ export const cargoFmt = Smithers.CargoLint({
 })
 
 // cargo clippy --all-targets --locked -- -D warnings
-export const cargoClippy = Smithers.CargoLint({
+const cargoClippy = Smithers.CargoLint({
   toolchain: rustToolchain,
   check: Smithers.Cargo.Clippy(),
   srcs,
@@ -36,11 +36,15 @@ export const cargoClippy = Smithers.CargoLint({
 })
 
 // cargo test --locked
-export const cargoTest = Smithers.CargoTest({
+const cargoTest = Smithers.CargoTest({
   toolchain: rustToolchain,
   check: Smithers.Cargo.Test(),
   srcs,
   deps: []
+})
+
+export const Package = Smithers.Package({
+  targets: { cargoFmt, cargoClippy, cargoTest }
 })
 ```
 

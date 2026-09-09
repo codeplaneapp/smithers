@@ -11,11 +11,14 @@ import { Smithers } from "@smthrs/targets"
 export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
 
-export const nodeModules = Smithers.Install({ packageManager })
+const nodeModules = Smithers.Install({ packageManager })
+
+export const Package = Smithers.Package({
+  targets: { nodeModules }
+})
 ```
 
-Exported from the root as `nodeModules`, the label is `//:nodeModules` and `//`
-resolves to it through the default-target search.
+Listed in the root Package map as `nodeModules`, the label is `//:nodeModules`.
 
 This replaces `PnpmWorkspace`, the manager-specific wrapper that configured
 itself: it hardcoded pnpm, took lockfile and workspace-manifest attrs it did

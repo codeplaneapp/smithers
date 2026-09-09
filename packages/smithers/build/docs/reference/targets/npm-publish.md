@@ -11,7 +11,7 @@ import { Smithers } from "@smthrs/targets"
 export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
 
-export const publish = Smithers.NpmPublish({
+const publish = Smithers.NpmPublish({
   packageManager,
   packageJson: Smithers.file("//packages/greeter/package.json"),
   artifacts: [Smithers.glob("//packages/greeter/dist/**/*")],
@@ -21,6 +21,10 @@ export const publish = Smithers.NpmPublish({
   provenance: true,
   tag: "latest",
   dryRun: true
+})
+
+export const Package = Smithers.Package({
+  targets: { publish }
 })
 ```
 

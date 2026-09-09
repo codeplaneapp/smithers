@@ -11,7 +11,7 @@ import { Smithers } from "@smthrs/targets"
 export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
 
-export const publishJsr = Smithers.JsrPublish({
+const publishJsr = Smithers.JsrPublish({
   packageManager,
   config: Smithers.file("//packages/greeter/jsr.json"),
   sources: [Smithers.glob("//packages/greeter/src/**/*.ts")],
@@ -19,6 +19,10 @@ export const publishJsr = Smithers.JsrPublish({
   package: "@smthrs/flow",
   allowDirty: false,
   dryRun: true
+})
+
+export const Package = Smithers.Package({
+  targets: { publishJsr }
 })
 ```
 

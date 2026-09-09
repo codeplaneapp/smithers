@@ -9,7 +9,7 @@ Runs an interactive `vitest watch` session.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const testWatch = Smithers.VitestWatch({
+const testWatch = Smithers.VitestWatch({
   packageManager,
   tests: [Smithers.glob("test/**/*.test.ts")],
   sources: [Smithers.glob("src/**/*.ts")],
@@ -17,6 +17,10 @@ export const testWatch = Smithers.VitestWatch({
   config: Smithers.file("vitest.config.ts"),
   environment: "node",
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { testWatch }
 })
 ```
 

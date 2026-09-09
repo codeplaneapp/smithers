@@ -8,10 +8,14 @@ Checks that a package README has a level-one title and substantive prose.
 ```ts
 import { Smithers } from "@smthrs/targets"
 
-export const docs = Smithers.DocsParity({
+const docs = Smithers.DocsParity({
   readme: Smithers.file("README.md"),
   deps: [],
   cwd: "packages/widget"
+})
+
+export const Package = Smithers.Package({
+  targets: { docs }
 })
 ```
 

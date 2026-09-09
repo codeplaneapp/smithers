@@ -8,7 +8,11 @@ Scaffolds the smallest package tree the workspace default target can discover.
 ```ts
 import { Smithers } from "@smthrs/targets"
 
-export const newPackage = Smithers.NewPackage({ license: "MIT" })
+const newPackage = Smithers.NewPackage({ license: "MIT" })
+
+export const Package = Smithers.Package({
+  targets: { newPackage }
+})
 ```
 
 The package name is invocation state, not a declaration attribute:

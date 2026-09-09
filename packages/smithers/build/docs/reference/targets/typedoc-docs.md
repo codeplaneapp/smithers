@@ -11,7 +11,7 @@ import { Smithers } from "@smthrs/targets"
 export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
 
-export const docs = Smithers.TypedocDocs({
+const docs = Smithers.TypedocDocs({
   packageManager,
   sources: [Smithers.glob("packages/*/src/**/*.ts")],
   deps: [],
@@ -20,6 +20,10 @@ export const docs = Smithers.TypedocDocs({
   entryPoints: [Smithers.file("//packages/greeter/src/index.ts")],
   outDir: "//docs/api",
   plugin: ["typedoc-plugin-markdown"]
+})
+
+export const Package = Smithers.Package({
+  targets: { docs }
 })
 ```
 

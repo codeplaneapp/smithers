@@ -9,7 +9,7 @@ Runs `vitest run` with coverage enabled and declares the report directory.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const coverage = Smithers.VitestCoverage({
+const coverage = Smithers.VitestCoverage({
   packageManager,
   tests: [Smithers.glob("test/**/*.test.ts")],
   sources: [Smithers.glob("src/**/*.ts")],
@@ -19,6 +19,10 @@ export const coverage = Smithers.VitestCoverage({
   reportsDirectory: "coverage",
   thresholds: { branches: 80, functions: 80, lines: 80, statements: 80 },
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { coverage }
 })
 ```
 

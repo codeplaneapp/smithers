@@ -13,7 +13,7 @@ import { Smithers } from "@smthrs/targets"
 
 const fireworksKey = Smithers.Secret("FIREWORKS_API_KEY")
 
-export const sftLaunch = Smithers.ToolRun({
+const sftLaunch = Smithers.ToolRun({
   command: "firectl",
   args: [
     "supervised-fine-tuning-job",
@@ -29,6 +29,10 @@ export const sftLaunch = Smithers.ToolRun({
   deps: [],
   secrets: [fireworksKey],
   cwd: "evals/authoring"
+})
+
+export const Package = Smithers.Package({
+  targets: { sftLaunch }
 })
 ```
 

@@ -9,7 +9,7 @@ Runs Biome lint and format checks without writing files.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const lint = Smithers.BiomeCheck({
+const lint = Smithers.BiomeCheck({
   packageManager,
   sources: [Smithers.glob("src/**/*.ts")],
   deps: [],
@@ -18,6 +18,10 @@ export const lint = Smithers.BiomeCheck({
   format: true,
   unsafe: false,
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { lint }
 })
 ```
 

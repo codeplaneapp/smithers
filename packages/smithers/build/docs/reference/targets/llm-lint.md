@@ -8,7 +8,7 @@ Reviews changed files with a model against a rubric and fails on findings.
 ```ts
 import { Smithers } from "@smthrs/targets"
 
-export const review = Smithers.LlmLint({
+const review = Smithers.LlmLint({
   changes: Smithers.gitDiff("origin/main"),
   include: [Smithers.glob("//packages/**/*.ts")],
   context: [Smithers.glob("//docs/reference/*.md")],
@@ -19,6 +19,10 @@ export const review = Smithers.LlmLint({
   model: "claude-opus-5",
   batchSize: 8,
   failOn: "error"
+})
+
+export const Package = Smithers.Package({
+  targets: { review }
 })
 ```
 

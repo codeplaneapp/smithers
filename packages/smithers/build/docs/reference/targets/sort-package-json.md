@@ -9,12 +9,16 @@ Validates or rewrites `package.json` key ordering with `sort-package-json`.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const manifestOrder = Smithers.SortPackageJson({
+const manifestOrder = Smithers.SortPackageJson({
   packageManager,
   manifests: [Smithers.file("package.json")],
   deps: [],
   check: true,
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { manifestOrder }
 })
 ```
 

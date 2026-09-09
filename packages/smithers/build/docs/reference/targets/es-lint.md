@@ -9,7 +9,7 @@ Runs ESLint over declared source sets with a flat config.
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 
-export const lint = Smithers.EsLint({
+const lint = Smithers.EsLint({
   packageManager,
   sources: [Smithers.glob("src/**/*.ts")],
   deps: [],
@@ -17,6 +17,10 @@ export const lint = Smithers.EsLint({
   maxWarnings: 0,
   fix: false,
   cwd: "packages/greeter"
+})
+
+export const Package = Smithers.Package({
+  targets: { lint }
 })
 ```
 
