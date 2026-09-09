@@ -148,8 +148,11 @@ private stderr diagnostic through a trusted host observer.
 **Code.** `protocol_error`.
 
 **What happened.** One inbound line exceeded `maxFrameBytes` (1 MiB by default).
-The stdout reader never retains more than one bounded partial frame, so this
-also fires when a server writes a large amount of output with no newline.
+The limit is inclusive and counts UTF-8 bytes, excluding the newline and an
+optional preceding carriage return. Chunk boundaries do not affect the limit.
+The stdout reader retains one bounded partial frame plus at most one pending
+carriage return, so this also fires when a server writes too much output
+without a newline. Each byte is scanned once and each frame is decoded once.
 
 **What to change.** For a tool that genuinely returns megabytes, raise
 `maxFrameBytes`. Otherwise check that the server terminates each JSON-RPC

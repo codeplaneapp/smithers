@@ -9,7 +9,9 @@
  * @since 0.1.0
  */
 import { NodeServices } from "@effect/platform-node"
-import { Effect, Redacted, Schema } from "effect"
+import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
+import { Deferred, Effect, Redacted, Schema, Sink, Stream } from "effect"
+import { makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -17,6 +19,7 @@ import { describe, expect, it, vi } from "vitest"
 import * as Diagnostics from "../src/Diagnostics.ts"
 import * as StdioTransport from "../src/internal/StdioTransport.ts"
 import * as McpClient from "../src/McpClient.ts"
+import { McpError } from "../src/McpError.ts"
 import * as McpFlows from "../src/McpFlows.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
@@ -1121,5 +1124,106 @@ describe("McpClient against a real MCP server", () => {
       "mcp/connected/add",
       "mcp/connected/error"
     ])
+  })
+})
+
+// A real pipe may coalesce writes. This process handle delivers the exact byte
+// chunks to the production stdout reader, only after the request is dispatched.
+const chunkedReply = (chunks: ReadonlyArray<Uint8Array>, maxFrameBytes: number) =>
+  Effect.scoped(Effect.gen(function*() {
+    const written = yield* Deferred.make<void>()
+    const transport = yield* StdioTransport.connect({
+      server: "chunked-stdout",
+      command: "fixture",
+      args: [],
+      maxFrameBytes,
+      requestTimeoutMs: 5_000
+    }).pipe(Effect.provideService(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.makeNoop({
+        spawn: () =>
+          Effect.succeed(makeHandle({
+            pid: ProcessId(1),
+            exitCode: Effect.never,
+            isRunning: Effect.succeed(true),
+            kill: () => Effect.void,
+            stdin: Sink.forEach((_chunk: Uint8Array) => Deferred.succeed(written, undefined)),
+            stdout: Stream.fromEffect(Deferred.await(written)).pipe(
+              Stream.flatMap(() => Stream.fromIterable(chunks)),
+              Stream.concat(Stream.never)
+            ),
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          }))
+      })
+    ))
+    return yield* transport.request("chunked")
+  }))
+
+describe("inbound byte frame boundaries", () => {
+  const result = { content: [{ type: "text", text: "prefix-é-😀-suffix" }], isError: false }
+  const line = JSON.stringify({ jsonrpc: "2.0", id: 1, result })
+  // Buffer.byteLength is independent of the transport's TextEncoder/Decoder.
+  const bytes = Buffer.from(line, "utf8")
+  const length = Buffer.byteLength(line, "utf8")
+  const emoji = bytes.indexOf(Buffer.from("😀"))
+
+  it.each([1, 0])("preserves a fragmented UTF-8 reply at limit minus %i", async (headroom) => {
+    expect(length).toBeGreaterThan(line.length)
+    const chunks = [
+      bytes.subarray(0, emoji + 1),
+      bytes.subarray(emoji + 1, emoji + 3),
+      bytes.subarray(emoji + 3),
+      Buffer.from("\n")
+    ]
+    expect(await execute(chunkedReply(chunks, length + headroom))).toEqual(result)
+  })
+
+  it("rejects limit plus one UTF-8 bytes before a newline arrives", async () => {
+    const error = await execute(Effect.flip(chunkedReply([
+      bytes.subarray(0, emoji + 2),
+      bytes.subarray(emoji + 2)
+    ], length - 1)))
+    expect(error).toBeInstanceOf(McpError)
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "chunked-stdout",
+      message: `MCP frame exceeded ${length - 1} bytes`
+    })
+  })
+
+  it.each([
+    { label: "together", chunks: [Buffer.concat([bytes, Buffer.from("\r\n")])] },
+    { label: "split after CR", chunks: [Buffer.concat([bytes, Buffer.from("\r")]), Buffer.from("\n")] },
+    { label: "in three chunks", chunks: [bytes, Buffer.from("\r"), Buffer.from("\n")] }
+  ])("accepts an exact-limit frame with CRLF $label", async ({ chunks }) => {
+    expect(await execute(chunkedReply(chunks, length))).toEqual(result)
+  })
+
+  it("bounds encoding work for a 16 MiB frame in 64 KiB chunks", async () => {
+    const largeResult = { text: "x".repeat(16 * 1024 * 1024 - 100) }
+    const frame = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 1, result: largeResult }) + "\n")
+    const chunks: Array<Uint8Array> = []
+    for (let offset = 0; offset < frame.byteLength; offset += 64 * 1024) {
+      chunks.push(frame.subarray(offset, offset + 64 * 1024))
+    }
+    // Bound allocation work rather than wall time on a shared CI machine. The
+    // old partial-frame re-encoding processes over 2 GiB for this single reply.
+    let encodedBytes = 0
+    const encode = TextEncoder.prototype.encode
+    const spy = vi.spyOn(TextEncoder.prototype, "encode").mockImplementation(function(this: TextEncoder, input) {
+      const encoded = encode.call(this, input)
+      encodedBytes += encoded.byteLength
+      return encoded
+    })
+    try {
+      expect(await execute(chunkedReply(chunks, frame.byteLength - 1))).toEqual(largeResult)
+      expect(encodedBytes).toBeLessThan(frame.byteLength * 2)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

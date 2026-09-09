@@ -171,35 +171,55 @@ const replyError = (
   })
 }
 
-/** Splits stdout without ever retaining more than one bounded partial frame. */
+/** Splits stdout in linear time, retaining one bounded partial frame plus an optional CR. */
 const frames = (
   server: string,
   maxFrameBytes: number,
   stream: Stream.Stream<Uint8Array, unknown>
 ): Stream.Stream<string, unknown | McpError> => {
-  const encoder = new TextEncoder()
-  const check = (line: string): Effect.Effect<string, McpError> =>
-    encoder.encode(line).byteLength <= maxFrameBytes
-      ? Effect.succeed(line)
-      : Effect.fail(protocol(server, `MCP frame exceeded ${maxFrameBytes} bytes`))
+  type PartialFrame = { pieces: Array<Uint8Array>; bytes: number }
+  const decoder = new TextDecoder()
+  const decode = (partial: PartialFrame): string => {
+    const joined = new Uint8Array(partial.bytes)
+    let offset = 0
+    for (const piece of partial.pieces) {
+      joined.set(piece, offset)
+      offset += piece.byteLength
+    }
+    const end = joined[partial.bytes - 1] === 0x0d ? partial.bytes - 1 : partial.bytes
+    return decoder.decode(joined.subarray(0, end))
+  }
   return stream.pipe(
-    Stream.decodeText(),
     Stream.mapAccumEffect(
-      () => "",
+      (): PartialFrame => ({ pieces: [], bytes: 0 }),
       (partial, chunk) => {
-        const pieces = `${partial}${chunk}`.split("\n")
-        // `split` always returns at least one member.
-        const tail = pieces.pop()!
-        return Effect.gen(function*() {
-          yield* check(tail)
-          const complete = yield* Effect.forEach(
-            pieces,
-            (line) => check(line.endsWith("\r") ? line.slice(0, -1) : line)
-          )
-          return [tail, complete] as const
-        })
+        const complete: Array<string> = []
+        const append = (piece: Uint8Array): boolean => {
+          if (piece.byteLength === 0) return true
+          const bytes = partial.bytes + piece.byteLength
+          // A final CR may be the first half of CRLF. Allow that one byte
+          // beyond the cap, but count it if more frame content follows.
+          const contentBytes = bytes - (piece[piece.byteLength - 1] === 0x0d ? 1 : 0)
+          if (contentBytes > maxFrameBytes) return false
+          partial.pieces.push(piece)
+          partial.bytes = bytes
+          return true
+        }
+        let start = 0
+        for (let end = chunk.indexOf(0x0a); end !== -1; end = chunk.indexOf(0x0a, start)) {
+          if (!append(chunk.subarray(start, end))) {
+            return Effect.fail(protocol(server, `MCP frame exceeded ${maxFrameBytes} bytes`))
+          }
+          complete.push(decode(partial))
+          partial = { pieces: [], bytes: 0 }
+          start = end + 1
+        }
+        if (!append(chunk.subarray(start))) {
+          return Effect.fail(protocol(server, `MCP frame exceeded ${maxFrameBytes} bytes`))
+        }
+        return Effect.succeed([partial, complete] as const)
       },
-      { onHalt: (partial) => partial === "" ? [] : [partial.endsWith("\r") ? partial.slice(0, -1) : partial] }
+      { onHalt: (partial) => partial.bytes === 0 ? [] : [decode(partial)] }
     ),
     Stream.filter((line) => line.trim() !== "")
   )
