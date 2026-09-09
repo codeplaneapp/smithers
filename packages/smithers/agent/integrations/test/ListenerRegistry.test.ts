@@ -1,20 +1,27 @@
 import { Cause, Effect, Exit } from "effect"
+import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
-import {
+import fs, {
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync
 } from "node:fs"
+import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { promisify } from "node:util"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { make as makeClient } from "../src/github/GitHubClient.ts"
 import {
   DEFAULT_LOCK_PATH,
@@ -72,6 +79,8 @@ let workspace: string | undefined
 let fixture: Fixture | undefined
 
 afterEach(async () => {
+  vi.restoreAllMocks()
+  syncBuiltinESMExports()
   if (workspace !== undefined) rmSync(workspace, { recursive: true, force: true })
   workspace = undefined
   await fixture?.close()
@@ -758,7 +767,7 @@ describe("workspace apply lock", () => {
 
   it("refuses an apply while a fresh holder owns the workspace lock", async () => {
     const root = makeWorkspace({ version: 1, listeners: [listener()] })
-    writeFileSync(lockPath(root), JSON.stringify({ pid: 43_210, startedAtMs: Date.now() }))
+    writeFileSync(lockPath(root), JSON.stringify({ pid: process.pid, startedAtMs: Date.now() }))
     fixture = await startFixture((request, response) =>
       json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 701 })
     )
@@ -774,9 +783,168 @@ describe("workspace apply lock", () => {
     expect(fixture.requests.some((request) => request.method === "POST")).toBe(false)
   })
 
+  it("refuses an apply while another owner is initializing an empty lock", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    const descriptor = openSync(lockPath(root), "wx", 0o600)
+    fixture = await startFixture((request, response) =>
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 708 })
+    )
+    try {
+      const exit = await Effect.runPromise(Effect.exit(reconcile({
+        workspaceRoot: root,
+        apply: true,
+        env,
+        client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+      })))
+      const failure = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isFailReason)?.error : undefined
+      expect(failure).toMatchObject({ reason: "listener-conflict" })
+      expect(fstatSync(descriptor).nlink).toBe(1)
+      expect(fixture.requests).toHaveLength(0)
+      expect(readFileSync(lockPath(root), "utf8")).toBe("")
+    } finally {
+      closeSync(descriptor)
+    }
+  })
+
+  it("reclaims a fresh lock when its holder PID no longer exists", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    const pid = 1_073_741_824
+    expect(() => process.kill(pid, 0)).toThrowError(expect.objectContaining({ code: "ESRCH" }))
+    writeFileSync(lockPath(root), JSON.stringify({ pid, startedAtMs: Date.now() }))
+    fixture = await startFixture((request, response) =>
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 709 })
+    )
+    const result = await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(result.applied.map((action) => action.action)).toEqual(["create"])
+    expect(fixture.requests.filter((request) => request.method === "POST")).toHaveLength(1)
+    expect(existsSync(lockPath(root))).toBe(false)
+  })
+
+  it("does not reclaim a holder when the liveness check is denied", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    writeFileSync(lockPath(root), JSON.stringify({ pid: process.pid, startedAtMs: Date.now() }))
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("permission denied"), { code: "EPERM" })
+    })
+    const failure = await Effect.runPromise(Effect.flip(reconcile({ workspaceRoot: root, apply: true, env })))
+    expect(failure.reason).toBe("listener-conflict")
+    expect(kill).toHaveBeenCalledWith(process.pid, 0)
+    expect(existsSync(lockPath(root))).toBe(true)
+  })
+
+  it("preserves a replacement holder published during the liveness check", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    writeFileSync(lockPath(root), JSON.stringify({ pid: 1_073_741_824, startedAtMs: Date.now() }))
+    const replacement = JSON.stringify({ pid: process.pid, startedAtMs: Date.now() })
+    vi.spyOn(process, "kill").mockImplementationOnce(() => {
+      rmSync(lockPath(root))
+      writeFileSync(lockPath(root), replacement)
+      throw Object.assign(new Error("dead holder"), { code: "ESRCH" })
+    })
+    const failure = await Effect.runPromise(Effect.flip(reconcile({ workspaceRoot: root, apply: true, env })))
+    expect(failure.reason).toBe("listener-conflict")
+    expect(readFileSync(lockPath(root), "utf8")).toBe(replacement)
+  })
+
+  it("allows exactly one hook POST from two concurrent processes", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    fixture = await startFixture(async (request, response) => {
+      if (request.method === "GET") await held
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 710 })
+    })
+    const options = { workspaceRoot: root, apply: true, env, apiBaseUrl: fixture.origin }
+    const module = new URL("../src/github/ListenerRegistry.ts", import.meta.url).href
+    const source = `
+      import { Effect } from "effect"
+      import { reconcile } from ${JSON.stringify(module)}
+      const exit = await Effect.runPromise(Effect.exit(reconcile(${JSON.stringify(options)})))
+      console.log(exit._tag)
+    `
+    const runs = Array.from(
+      { length: 2 },
+      () =>
+        promisify(execFile)(process.execPath, ["--input-type=module", "--eval", source], {
+          cwd: new URL("..", import.meta.url),
+          signal: AbortSignal.timeout(15_000)
+        })
+    )
+    try {
+      // The winner waits in GET until the contender has finished acquiring.
+      const first = await Promise.race(runs)
+      expect(first.stdout.trim()).toBe("Failure")
+      release()
+      const results = await Promise.all(runs)
+      expect(results.map((result) => result.stdout.trim()).sort()).toEqual(["Failure", "Success"])
+      expect(fixture.requests.filter((request) => request.method === "POST")).toHaveLength(1)
+      expect(existsSync(lockPath(root))).toBe(false)
+    } finally {
+      release()
+      await Promise.allSettled(runs)
+    }
+  })
+
+  it("retries if a holder releases after exclusive publication reports contention", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    writeFileSync(lockPath(root), JSON.stringify({ pid: process.pid, startedAtMs: Date.now() }))
+    fixture = await startFixture((request, response) =>
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 711 })
+    )
+    const link = fs.linkSync
+    const publish = vi.spyOn(fs, "linkSync").mockImplementationOnce((source, target) => {
+      try {
+        link(source, target)
+      } finally {
+        // Release after the real EEXIST but before the contender can inspect.
+        rmSync(lockPath(root))
+      }
+    })
+    syncBuiltinESMExports()
+    const result = await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(publish).toHaveBeenCalledTimes(2)
+    expect(result.applied.map((action) => action.action)).toEqual(["create"])
+    expect(existsSync(lockPath(root))).toBe(false)
+    expect(readdirSync(join(root, ".smithers")).some((name) => name.endsWith(".tmp"))).toBe(false)
+  })
+
+  it("cleans up the private record when atomic publication fails", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    const publish = vi.spyOn(fs, "linkSync").mockImplementationOnce((source) => {
+      expect(JSON.parse(readFileSync(source, "utf8"))).toMatchObject({ pid: process.pid })
+      expect(statSync(source).mode & 0o777).toBe(0o600)
+      expect(existsSync(lockPath(root))).toBe(false)
+      throw Object.assign(new Error("publication failed"), { code: "EIO" })
+    })
+    syncBuiltinESMExports()
+    const failure = await Effect.runPromise(Effect.flip(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    })))
+    expect(failure.reason).toBe("invalid-config")
+    expect(publish).toHaveBeenCalledOnce()
+    expect(fixture.requests).toHaveLength(0)
+    expect(readdirSync(join(root, ".smithers"))).toEqual(["listeners.json"])
+  })
+
   it("does not take or wait for the workspace lock while only planning", async () => {
     const root = makeWorkspace({ version: 1, listeners: [listener()] })
-    writeFileSync(lockPath(root), JSON.stringify({ pid: 43_210, startedAtMs: Date.now() }))
+    writeFileSync(lockPath(root), JSON.stringify({ pid: process.pid, startedAtMs: Date.now() }))
     fixture = await startFixture((_request, response) => json(response, 200, []))
     const result = await Effect.runPromise(reconcile({
       workspaceRoot: root,
@@ -792,7 +960,7 @@ describe("workspace apply lock", () => {
     writeFileSync(
       lockPath(root),
       JSON.stringify({
-        pid: 43_210,
+        pid: process.pid,
         startedAtMs: Date.now() - PENDING_CREATE_MAX_AGE_MS - 1
       })
     )
@@ -809,7 +977,7 @@ describe("workspace apply lock", () => {
     expect(existsSync(lockPath(root))).toBe(false)
   })
 
-  it("reclaims a malformed lock record", async () => {
+  it("reclaims a malformed lock record after the initialization grace period", async () => {
     const malformed = [
       "{not json",
       "null",
@@ -823,6 +991,8 @@ describe("workspace apply lock", () => {
     for (const contents of malformed) {
       const root = makeWorkspace({ version: 1, listeners: [listener()] })
       writeFileSync(lockPath(root), contents)
+      const old = new Date(Date.now() - 60_000)
+      utimesSync(lockPath(root), old, old)
       fixture = await startFixture((request, response) =>
         json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 703 })
       )

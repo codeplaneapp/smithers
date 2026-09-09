@@ -32,6 +32,7 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -834,9 +835,9 @@ interface WorkspaceLock extends WorkspaceLockHolder {
   readonly contents: string
 }
 
-const readWorkspaceLockHolder = (path: string): WorkspaceLockHolder | null => {
+const readWorkspaceLockHolder = (contents: string): WorkspaceLockHolder | null => {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
+    const parsed: unknown = JSON.parse(contents)
     if (!isRecord(parsed)) return null
     const pid = parsed["pid"]
     const startedAtMs = parsed["startedAtMs"]
@@ -846,44 +847,80 @@ const readWorkspaceLockHolder = (path: string): WorkspaceLockHolder | null => {
     ) return null
     return { pid, startedAtMs }
   } catch {
-    // A torn or unreadable record cannot prove there is a live holder. Treating
-    // it as fresh would wedge every future apply, so the acquirer reclaims it.
+    // Legacy writers may still be initializing an empty record. The acquirer
+    // uses its file age before considering an unreadable holder reclaimable.
     return null
+  }
+}
+
+const readWorkspaceLock = (path: string) => {
+  try {
+    const stat = lstatSync(path)
+    const contents = readFileSync(path, "utf8")
+    return { stat, contents, holder: readWorkspaceLockHolder(contents) }
+  } catch (cause) {
+    // A holder can release the lock between publication and inspection.
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined
+    throw cause
   }
 }
 
 const acquireWorkspaceLock = (workspaceRoot: string): WorkspaceLock => {
   const path = resolvePath(workspaceRoot, DEFAULT_LOCK_PATH)
   mkdirSync(dirname(path), { recursive: true })
-  for (;;) {
-    const holder = { pid: process.pid, startedAtMs: Date.now() }
-    const contents = `${JSON.stringify(holder, null, 2)}\n`
-    let descriptor: number
-    try {
-      descriptor = openSync(path, "wx", 0o600)
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause
-      const existing = readWorkspaceLockHolder(path)
-      // The same bounded age used for pending creates prevents a crashed
-      // process from wedging this workspace indefinitely.
-      if (existing !== null && Date.now() - existing.startedAtMs <= PENDING_CREATE_MAX_AGE_MS) {
+  const holder = { pid: process.pid, startedAtMs: Date.now(), nonce: randomUUID() }
+  const contents = `${JSON.stringify(holder, null, 2)}\n`
+  const temporary = `${path}.${holder.nonce}.tmp`
+  try {
+    // Publish only complete records. A hard link is exclusive, unlike rename,
+    // and cannot expose the empty-file window of open("wx") followed by write.
+    writeFileSync(temporary, contents, { flag: "wx", mode: 0o600 })
+    for (;;) {
+      try {
+        linkSync(temporary, path)
+        return { ...holder, path, contents }
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause
+      }
+      const existing = readWorkspaceLock(path)
+      if (existing === undefined) continue
+      let dead = false
+      if (existing.holder !== null) {
+        try {
+          process.kill(existing.holder.pid, 0)
+        } catch (cause) {
+          // EPERM and other failures do not establish that the holder died.
+          dead = (cause as NodeJS.ErrnoException).code === "ESRCH"
+        }
+      }
+      const held = existing.holder === null
+        ? Date.now() - existing.stat.mtimeMs <= 5_000
+        : !dead && Date.now() - existing.holder.startedAtMs <= PENDING_CREATE_MAX_AGE_MS
+      if (held) {
         throw new IntegrationError(
           "listener-conflict",
-          `GitHub listener apply refused because workspace lock ${path} is held by pid ${existing.pid}.`,
-          { lockPath: path, holderPid: existing.pid, startedAtMs: existing.startedAtMs, retryable: false }
+          `GitHub listener apply refused because workspace lock ${path} is held${
+            existing.holder === null ? " or initializing" : ` by pid ${existing.holder.pid}`
+          }.`,
+          {
+            lockPath: path,
+            holderPid: existing.holder?.pid,
+            startedAtMs: existing.holder?.startedAtMs,
+            retryable: false
+          }
         )
       }
+      // A competing reclaimer may have published a different holder while we
+      // checked liveness. Re-read both record and inode before removing it.
+      const current = readWorkspaceLock(path)
+      if (
+        current === undefined || current.contents !== existing.contents ||
+        current.stat.dev !== existing.stat.dev || current.stat.ino !== existing.stat.ino
+      ) continue
       rmSync(path, { force: true })
-      continue
     }
-    try {
-      writeFileSync(descriptor, contents)
-    } finally {
-      // A failed write leaves an unreadable record that the next acquirer can
-      // reclaim immediately, while the descriptor itself is always closed.
-      closeSync(descriptor)
-    }
-    return { ...holder, path, contents }
+  } finally {
+    rmSync(temporary, { force: true })
   }
 }
 

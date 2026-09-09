@@ -87,10 +87,13 @@ is the safety property working, not a bug.
 
 ### `listener-conflict`: the workspace lock is held
 
-Another process is applying against the same workspace, and its lock record
-is fresh. Wait for it to finish. A lock whose holder record is older than a
-day is reclaimed automatically, so a crashed process cannot wedge the
-workspace.
+Another process is applying against the same workspace. Wait for it to
+finish. A lock is reclaimed immediately when a PID liveness check reports
+`ESRCH` (the holder no longer exists). Permission errors do not prove the
+holder is dead. Records older than a day remain reclaimable as a fallback.
+An empty or malformed record is held for a five-second initialization grace
+period before it can be reclaimed. Replacement records are checked before
+removal.
 
 ### `delivery-failed`: more webhooks than one reconciliation can read
 
