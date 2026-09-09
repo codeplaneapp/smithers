@@ -6,9 +6,9 @@ sidebar:
 ---
 
 A host that names its flows in code has to be edited every time a flow is
-added. The optional third argument to `layer`, `make`, and `layerHost` is the
-seam that removes that edit: a registry layer whose catalog the registration
-phase reads from.
+added. The optional final argument is a registry layer whose catalog the
+registration phase reads from: third for `layerHost`, fifth for `make` and
+`layer`.
 
 ## Pass the project registry
 
@@ -42,7 +42,21 @@ const host = NodeRuntime.layerHost(
 and the rest of the discovery model, belongs to that package:
 [run a discovered flow](/pkg/registry/guides/run-a-discovered-flow).
 
-Omit the third argument and the registration phase runs with no catalog: your
+The lower-level constructors take the boundary and sandbox layers before
+registration and the registry:
+
+```ts
+const engine = NodeRuntime.layer(
+  options,
+  stepBoundary,
+  workspaceSandbox,
+  registration,
+  Executable.layerProject({ root })
+)
+```
+
+`NodeRuntime.make` takes the same five arguments and returns an `Effect`.
+Omit the registry argument and the registration phase runs with no catalog: your
 flows are whatever `Interpreter.layer` calls you wrote by hand.
 
 ## The build order is the whole contract

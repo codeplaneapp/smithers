@@ -466,9 +466,9 @@ export const layer: {
 /**
  * Configuration for the batteries-included Node host composition.
  *
- * Everything but the two required fields has a default that a single-process
- * Node program can live with, which is the point: {@link layerHost} exists so
- * a program does not restate the same eight layers to get a durable engine.
+ * `filename`, `workspaceRoot`, and `owner` are required. Everything else has
+ * a default that a single-process Node program can live with: {@link layerHost}
+ * exists so a program does not restate the same eight layers to get a durable engine.
  *
  * @since 0.1.0
  * @category models
@@ -646,6 +646,7 @@ interface ValidatedHostOptions extends ValidatedOptions {
 const validateHost = (options: HostOptions): ValidatedHostOptions => {
   const filename = options.filename
   const owner = options.owner
+  const hostId = decodeField("owner.hostId", Schema.NonEmptyString, owner?.hostId, nonEmpty)
   const configuredLiveness = options.isAlive
   const rules = options.rules
   const signals = options.signals
@@ -654,8 +655,8 @@ const validateHost = (options: HostOptions): ValidatedHostOptions => {
   const validated = validate({
     filename,
     workspaceRoot: options.workspaceRoot,
-    owner,
-    isAlive: configuredLiveness ?? HostLiveness.isAlive({ hostId: owner.hostId })
+    owner: { hostId },
+    isAlive: configuredLiveness ?? HostLiveness.isAlive({ hostId })
   })
   return Object.freeze({
     ...validated,

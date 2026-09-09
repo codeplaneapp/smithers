@@ -237,6 +237,24 @@ const completedValue = (result: Option.Option<Flow.Result<unknown, unknown>>): u
     : undefined
 
 describe("the supported Node SQLite composition", () => {
+  it.each([
+    ["omitted", {}],
+    ["null", { owner: null }]
+  ])("refuses a host owner that is %s before constructing the default liveness probe", (_, owner) => {
+    const root = join(directory, "absent-host-owner")
+    expect(() =>
+      NodeRuntime.layerHost(
+        { filename: join(root, "engine.db"), workspaceRoot: root, ...owner } as never,
+        Layer.empty
+      )
+    ).toThrowError(expect.objectContaining({
+      _tag: "@smthrs/flows/RuntimeConfigurationError",
+      code: "invalid_runtime_configuration",
+      field: "owner.hostId"
+    }))
+    expect(existsSync(root)).toBe(false)
+  })
+
   it("refuses an unusable configuration before it opens anything", () => {
     // Validation is eager: `layer` builds the composition when it is CALLED,
     // so a program with an empty filename fails at wiring time rather than

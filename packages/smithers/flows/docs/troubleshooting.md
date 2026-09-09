@@ -22,7 +22,7 @@ scope. `field` exists so an embedder can tell an empty `filename` from an empty
 | ------------------- | ---------------------------------------------------------------------------------------- |
 | `filename`          | An empty or non-string SQLite filename.                                                  |
 | `workspaceRoot`     | An empty or non-string workspace root, including `storage`'s second argument.            |
-| `owner.hostId`      | An empty host id, or an `options.owner` that is absent entirely.                         |
+| `owner.hostId`      | An empty or non-string host id, or an `options.owner` that is omitted or `null`.         |
 | `isAlive`           | An `isAlive` that is not a function. A function is the one option a schema cannot check. |
 | `signals`           | A `signals` value that is not an array, or a name that cannot be installed.              |
 | `shutdownTimeoutMs` | Anything that is not a safe integer from 0 through 2,147,483,647.                        |

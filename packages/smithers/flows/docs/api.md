@@ -131,7 +131,9 @@ It returns `false` (treated as dead) for an owner on another host, allowing
 takeover once that owner's lease has expired. A fresh heartbeat still blocks
 takeover. To preserve foreign-host owners, use `HostLiveness.isAlive({ hostId })`
 from [`@smthrs/platform-node`](/api/platform-node), which returns `true` for
-foreign hosts, or supply a distributed liveness check.
+foreign hosts, or supply a distributed liveness check. `HostLiveness.isAlive`
+is the `layerHost` default and refuses foreign-host takeover even after lease
+expiry. A multi-process deployment answers from its supervisor or lease system.
 
 ### `RuntimeConfigurationError`
 

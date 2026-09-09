@@ -21,8 +21,8 @@ you is one you need to make differently.
 ## Use `layerHost` for a single-process Node program
 
 `layerHost` exists so a program does not restate the same eight layers to get a
-durable engine. Two options are required; everything else has a default a
-single-process program can live with.
+durable engine. `filename`, `workspaceRoot`, and `owner` are required;
+everything else has a default a single-process program can live with.
 
 ```ts
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
@@ -83,11 +83,14 @@ processes on the strength of it.
 
 - A single-machine host passes `Ownership.sameHostPidProbe` from
   [`@smthrs/run-store`](/api/run-store), which asks this machine's process
-  table and never declares another host's owner dead.
+  table for owners on the same host. For a foreign host it returns `false`
+  without probing a PID, leaving the expired lease to decide takeover.
+  `RunStore.steal` still requires the lease to have expired.
 - A multi-process deployment answers from its supervisor or lease system.
 
 `layerHost` defaults `isAlive` to `HostLiveness.isAlive({ hostId })` from
-[`@smthrs/platform-node`](/api/platform-node), which is the same posture.
+[`@smthrs/platform-node`](/api/platform-node). This probe returns `true` for
+foreign-host owners, refusing takeover even after their lease expires.
 
 ## Drop to `layer` when you own the host
 
