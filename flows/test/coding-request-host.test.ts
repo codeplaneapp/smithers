@@ -14,13 +14,15 @@ import * as Serve from "../../packages/smithers/src/Serve.ts"
 import { layer } from "../coding/host.ts"
 import { NativeCoding, nativeLayer } from "../coding/native.ts"
 import { RequestResult } from "../coding/schema.ts"
+import { PocResult } from "../coding/poc.ts"
 import { operations } from "../wiki/operations.ts"
+import { policySources } from "../wiki/reuse.ts"
 import type { PageSpec } from "../wiki/schema.ts"
 
 const source = process.env.PLUE_CODING_ADAPTER_SOURCE
 const exporter = process.env.PLUE_JJ_EXPORT_BINARY
 const authoring = process.env.SMITHERS_ACCEPTANCE_SOURCE_ROOT ?? new URL("../", import.meta.url).pathname
-test("configured request host plans from verified memory and implements through native correction", {
+test("configured request host verifies wiki, prototypes, replans and implements through native correction", {
   skip: source === undefined || exporter === undefined ? "Set PLUE_CODING_ADAPTER_SOURCE and PLUE_JJ_EXPORT_BINARY to Plue's native artifacts" : false,
   timeout: 1_200_000
 }, async t => {
@@ -56,17 +58,15 @@ test("configured request host plans from verified memory and implements through 
   await symlink(join(authoring, "node_modules"), join(root, "node_modules"), "dir")
   await writeFile(join(root, ".gitignore"), ".flows/\nnode_modules\n*.tmp\nignored.txt\n")
   await writeFile(join(root, "guide.md"), "# File verifier\n\nThe verifier reads hello.txt.\n")
+  await mkdir(join(root, "flows", "wiki"), { recursive: true })
+  for (const file of policySources) await cp(join(authoring, "..", file), join(root, file))
   const page: PageSpec = { id: "verifier", title: "File verifier", kind: "current", purpose: "Find the current verifier.",
-    document: "guide.md", inputs: ["verify.mjs"], related: [] }
+    document: "guide.md", inputs: ["verify.mjs", ...policySources], related: [] }
   const wikiOutput = join(root, ".flows", "wiki")
   const wiki = operations({ root, output: wikiOutput })
-  await Effect.runPromise(Effect.gen(function*() {
-    const evidence = yield* wiki.collect(page)
-    return yield* wiki.write([{ evidence, reviewer: "scripted-host-acceptance", review: {
-      sections: evidence.sections.map(section => ({ id: section.id, verdict: "supported", explanation: "The fixture reads its file.",
-        citations: [{ path: "verify.mjs", line: 1, quote: "import {readFileSync} from 'node:fs';" }] }))
-    } }], "verified")
-  }).pipe(Effect.provide(platform.host)))
+  const evidence = await Effect.runPromise(wiki.collect(page).pipe(Effect.provide(platform.host)))
+  const wikiReview = { sections: evidence.sections.map(section => ({ id: section.id, verdict: "supported", explanation: "The fixture reads its file.",
+    citations: [{ path: "verify.mjs", line: 1, quote: "import {readFileSync} from 'node:fs';" }] })) }
   jj("status")
   const config = join(temporary, "coding.json"), reporter = join(temporary, "reporter"), wrapper = join(temporary, "adapter.py")
   await writeFile(config, JSON.stringify({ version: 1, workspaceId: "host-acceptance", actorId: 42, repositoryPath: root, username: userInfo().username }))
@@ -76,13 +76,14 @@ test("configured request host plans from verified memory and implements through 
   await writeFile(wrapper, `import importlib.util,json,sys\nspec=importlib.util.spec_from_file_location("coding",${JSON.stringify(adapterSource)})\ncoding=importlib.util.module_from_spec(spec)\nspec.loader.exec_module(coding)\ncoding.REPORTER_SCRIPT=${JSON.stringify(reporter)}\ntry:\n print(json.dumps(coding.run_local(${JSON.stringify(config)}, engine="--engine" in sys.argv)))\nexcept coding.CodingError as error:\n print(json.dumps({"error":{"code":error.code,"message":error.message}}))\n sys.exit(1)\n`)
   const options = { repositoryPath: root, adapterPath: wrapper,
     gatewayId: "11111111-1111-4111-8111-111111111111", implementationModel: "test:scripted", exporterPath: exporter,
-    planning: { wikiOutput, pages: [page], implementation: "coding/implementation", checks: ["fast", "slow"].map(tier => ({
+    planning: { wikiOutput, pages: [page], reviewer: "scripted-host-acceptance/v1", implementation: "coding/implementation", checks: ["fast", "slow"].map(tier => ({
       id: tier, target: "hello.txt", flow: `checks/${tier}`, tier: tier as "fast" | "slow", required: true
     })) } }
   const initial = await Effect.runPromise(Effect.flatMap(NativeCoding, native => native.read()).pipe(
     Effect.provide(nativeLayer(options)), Effect.provide(platform.host), Effect.scoped))
   assert.equal(initial.head.kind, "resolved")
   const calls: string[] = []
+  t.after(() => passed ? Promise.resolve() : writeFile(join(temporary, "model-requests.json"), JSON.stringify(calls.map(value => JSON.parse(value)), null, 2)))
   const hello = join(root, "hello.txt")
   const cell = `
     const ignored = await ctx.call("write", ${JSON.stringify({path:join(root,"ignored.txt"),content:"must not persist"})});
@@ -100,11 +101,17 @@ test("configured request host plans from verified memory and implements through 
     calls.push(serialized)
     const review = serialized.includes("Review a coding request against supplied repository memory")
     const planning = serialized.includes("Plan one linear mythical coding progression")
-    const response = review ? { explanation: "The repository has a file verifier; preserve its expected contents.", clarification: "" }
+    const wikiReviewing = serialized.includes("Review a repository wiki page against its exact source snapshot")
+    const draftingPoc = serialized.includes("Draft a small disposable file-level prototype")
+    const reviewingPoc = serialized.includes("Review this actually materialized, discarded file-level prototype")
+    const response = wikiReviewing ? wikiReview
+      : draftingPoc ? { explanation: "Try a deliberately incomplete greeting in the discarded prototype.", files: [{ path: "hello.txt", content: "prototype greeting\n" }] }
+      : reviewingPoc ? { findings: ["The measured prototype greeting differs from the verifier's expected text; no checks ran."], nextPlan: "Use the exact expected real greeting for implementation." }
+      : review ? { explanation: "The repository has a file verifier; preserve its expected contents.", clarification: "" }
       : { rationale: "Append one native atom and use both registered checks.", baseChangeId: initial.head.changeId,
           changes: [{ id: "hello", title: "Hello", intent: "Write the requested file.", checks: ["fast", "slow"],
             atoms: [{ changeId: null, message: "✨ feat: add hello", intent: "Write hello.txt", reads: ["verify.mjs"], writes: ["hello.txt"] }] }] }
-    const emitted = review || planning ? `
+    const emitted = review || planning || wikiReviewing || draftingPoc || reviewingPoc ? `
       const forbidden = await ctx.call("write", ${JSON.stringify({path:join(root,"planner-mutation.txt"),content:"must not persist"})});
       if (forbidden.ok !== false) throw new Error("planning unexpectedly had mutation authority");
       ctx.done(${JSON.stringify(response)});` : cell
@@ -137,7 +144,7 @@ test("configured request host plans from verified memory and implements through 
     assert.equal(health.gatewayId, options.gatewayId)
     assert.deepEqual(health.capabilities, ["coding-plan/v1", "coding-request/v1"])
     assert.equal(Serve.health(root).capabilities, undefined, "ordinary CLI health does not claim native coding")
-    const card = yield* control.plan({ flowId: "coding/request", input: { prompt: "Write hello.txt", maxRounds: 2 } })
+    const card = yield* control.plan({ flowId: "coding/request", input: { prompt: "Write hello.txt", feedback: "Keep the verifier unchanged.", maxRounds: 2 } })
     yield* control.approve(card.approval)
     const receipt = yield* control.run({ _tag: "Plan", planId: card.planId, digest: card.digest, envelope: card.envelope, idempotencyKey: "native-request-host" })
     assert.equal(receipt._tag, "Accepted")
@@ -145,7 +152,7 @@ test("configured request host plans from verified memory and implements through 
     return yield* control.watch({ runId: receipt.runId, follow: true }).pipe(
       Stream.tap(event => Effect.promise(() => appendFile(join(temporary, "control-events.ndjson"), JSON.stringify(event) + "\n"))),
       Stream.takeUntil(event => event.kind === "control.engine.projection-settled"), Stream.runCollect,
-      Effect.timeout("180 seconds"))
+      Effect.timeout("600 seconds"))
   }).pipe(Effect.provide(layer(observedPlatform, options, seats)), Effect.scoped))
   const failed = result.find(event => event.kind === "control.run.failed")
   assert.equal(failed, undefined, JSON.stringify({ failed, contents: await readFile(join(root, "hello.txt"), "utf8").catch(() => null),
@@ -156,7 +163,11 @@ test("configured request host plans from verified memory and implements through 
   assert.equal(await readFile(join(root, "ignored.txt"), "utf8").catch(() => null), null)
   assert.equal(await readFile(join(root, "planner-mutation.txt"), "utf8").catch(() => null), null)
   await writeFile(join(temporary, "model-requests.json"), JSON.stringify(calls.map(value => JSON.parse(value)), null, 2))
-  assert.equal(calls.length, 3)
+  assert.equal(calls.length, 8, "One wiki review, two planning passes, POC draft/review and one implementation; the second wiki refresh reuses its review")
+  const planningCalls = calls.filter(value => value.includes("Plan one linear mythical coding progression"))
+  assert.equal(planningCalls.length, 2)
+  assert(planningCalls[1]!.includes("Keep the verifier unchanged."))
+  assert(planningCalls[1]!.includes("Saved disposable file-level POC: drafted-unvalidated"))
   assert.ok(calls.some(call => call.includes("The verifier reads hello.txt.")), "planning must receive verified repository memory")
   const completed = Schema.Struct({ payload: Schema.Struct({ state: Schema.Struct({
     flowName: Schema.Literal("coding/Request"), result: Schema.Struct({ _tag: Schema.Literal("Complete"),
@@ -168,9 +179,26 @@ test("configured request host plans from verified memory and implements through 
   })
   assert.equal(outcomes.length, 1, "the actual Request child must have one typed completed result")
   assert.equal(outcomes[0]!.outcome.status, "validated")
+  const completedPoc = Schema.Struct({ payload: Schema.Struct({ state: Schema.Struct({
+    flowName: Schema.Literal("coding/Poc"), result: Schema.Struct({ _tag: Schema.Literal("Complete"),
+      exit: Schema.Struct({ _tag: Schema.Literal("Success"), value: PocResult }) })
+  }) }) })
+  const prototypes = result.filter(event => event.kind === "control.engine.event").flatMap(event => {
+    const decoded = Schema.decodeUnknownOption(completedPoc)(event.payload)
+    return Option.isSome(decoded) ? [decoded.value.payload.state.result.exit.value] : []
+  })
+  assert.equal(prototypes.length, 1, "the discarded prototype remains inspectable in its own native child result")
+  assert.equal(prototypes[0]!.status, "drafted-unvalidated")
+  assert.equal(prototypes[0]!.source.commitId, initial.head.commitId)
+  assert.deepEqual(prototypes[0]!.changes.files.map(({ path, before, after }) => ({ path, before, after })),
+    [{ path: "hello.txt", before: null, after: "prototype greeting\n" }])
+  assert(prototypes[0]!.changes.preview.content.includes("prototype greeting"))
   assert.equal(outcomes[0]!.plan.observedHead?.commitId, initial.head.commitId)
   assert.equal(outcomes[0]!.outcome.result?.changes[0]?.implementation.atoms[0]?.changeId,
     jj("log", "--no-graph", "-r", "@", "-T", "change_id").trim())
   assert.equal(jj("log", "--no-graph", "-r", "@", "-T", "description").trim(), "✨ feat: add hello")
+  if (process.env.SMITHERS_ACCEPTANCE_EVENTS) {
+    await cp(join(temporary, "control-events.ndjson"), process.env.SMITHERS_ACCEPTANCE_EVENTS)
+  }
   passed = true
 })

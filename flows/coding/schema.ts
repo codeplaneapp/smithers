@@ -46,7 +46,7 @@ export const Plan = Schema.Struct({
   base: Revision,
   // New prepared plans retain the complete source head. An amendment's base
   // can be older than the source the planner inspected. Legacy manual plans
-  // remain readable, but cannot supply a source-fenced POC without this fact.
+  // remain readable; composed requests require this observed source fact.
   observedHead: Schema.optionalKey(Revision),
   changes: Schema.Array(Change).check(Schema.isMinLength(1))
 })
@@ -54,11 +54,13 @@ export type Plan = typeof Plan.Type
 export const PlanningInput = Schema.Struct({
   prompt: Text.check(Schema.isMaxLength(32_768)),
   // Feedback is not evidence that a disposable POC was actually executed.
-  feedback: Schema.String.check(Schema.isMaxLength(32_768))
+  // The second pass preserves both the bounded user feedback and retained POC
+  // feedback (32,768 characters each), separated by two newlines.
+  feedback: Schema.String.check(Schema.isMaxLength(65_538))
 })
 export const RequestInput = Schema.Struct({
   prompt: PlanningInput.fields.prompt,
-  feedback: Schema.optionalKey(PlanningInput.fields.feedback),
+  feedback: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(32_768))),
   maxRounds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(8)))
 })
 export const Finding = Schema.Struct({

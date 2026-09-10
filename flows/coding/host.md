@@ -18,13 +18,18 @@ smithers-coding-host serve --root /home/developer/workspace --host 0.0.0.0 --por
 
 Providing the private `planning` operator configuration also enables
 [`coding/request`](request.md) and its `coding-request/v1` health capability.
-This composes existing memory, planning and correction flows and returns their
-recorded `Plan` plus product outcome through the normal Control operations.
+This composes existing verified wiki, memory, first planning, discarded POC,
+second planning and correction flows. It returns their recorded `Plan` plus
+product outcome through the normal Control operations. The complete POC source
+preview remains in its ordinary child result.
 The same verified catalog is injected into those action layers before they
-register. Planning receives the configured `planningModel`, falling back to the
-explicit implementation model, and uses the evidence-only authority recipe.
+register. Planning, prototype and wiki review receive their configured
+`planningModel`, `pocModel` and `wikiModel`, each falling back to the explicit
+implementation model, through the existing seat resolver. All these model roles
+use the evidence-only authority recipe. The required wiki `reviewer` policy,
+selected wiki model and gateway identity participate in review reuse identity.
 
-Catalog imports need the existing trusted host filesystem to load verified declaration bytes through a temporary sibling module. That filesystem is scoped to startup loading. Resulting handler registrations use the original guarded context. Immutable checks separately capture the trusted filesystem only for host-owned scratch creation and cleanup; their processes retain the contained, guarded spawner. Agent file tools retain their workspace guards.
+Catalog imports need the existing trusted host filesystem to load verified declaration bytes through a temporary sibling module. Deterministic wiki publication and memory verification also use that injected host filesystem for the operator's configured paths, with the owning wiki's canonical source/output and semantic checks. The model receives captured evidence only. Resulting agent registrations use the original guarded context. Immutable checks separately capture the trusted filesystem only for host-owned scratch creation and cleanup; their processes retain the contained, guarded spawner. Agent file tools retain their workspace guards.
 
 Every native handler traverses recorded parent edges to its one active, approved Control root. It receives the existing `AgentAction.Host` with that root's approved capability envelope, along with the shared budget and quota policy. Construction-time services grant no execution authority. The real standard tool catalog is shared with `AgentSession`.
 

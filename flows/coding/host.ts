@@ -2,6 +2,7 @@
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as Executable from "@smthrs/registry/Executable"
+import * as Digest from "@smthrs/core/Digest"
 import { HumanTask, Interpreter } from "@smthrs/flow"
 import { Context, Effect, FileSystem, Layer } from "effect"
 import * as NativeControl from "../../packages/smithers/src/internal/NativeControl.ts"
@@ -19,6 +20,10 @@ import { DraftPlan, planningPolicy, PreparePlan, ReviewRequest } from "./plannin
 import { evidenceOnly } from "./planning-authority.ts"
 import { requestRegistration, RunRequest } from "./request.ts"
 import { sourceAdmission } from "./source-admission.ts"
+import { planningWikiLayers } from "./planning-wiki.ts"
+import { ReviewPage } from "../wiki/workflow.ts"
+import { pocModels, pocPolicy } from "./poc.ts"
+import { pocSource } from "./poc-source.ts"
 
 /** Operator configuration, never accepted from a workflow or gateway request. */
 export interface Options extends NativeOptions {
@@ -27,17 +32,21 @@ export interface Options extends NativeOptions {
   readonly exporterPath?: string | undefined
   readonly checkEnvironment?: Readonly<Record<string, string>> | undefined
   /** Enables the private prompt route using this repository's owning memory/check configuration. */
-  readonly planning?: Omit<MemoryOptions, "repositoryPath"> | undefined
+  readonly planning?: (Omit<MemoryOptions, "repositoryPath"> & { readonly reviewer: string }) | undefined
   readonly planningModel?: string | undefined
+  readonly pocModel?: string | undefined
+  readonly wikiModel?: string | undefined
 }
 
-const role = "coding/implement"
 const configured = (options: Options) => {
   if (!/^[a-z0-9-]+:[^\s:]+$/.test(options.implementationModel)) {
     throw new Error("Set SMITHERS_CODING_IMPLEMENT_MODEL to an explicit provider:model for coding/implement")
   }
-  if (options.planningModel !== undefined && !/^[a-z0-9-]+:[^\s:]+$/.test(options.planningModel)) {
-    throw new Error("The planning model must be an explicit provider:model")
+  for (const model of [options.planningModel, options.pocModel, options.wikiModel]) {
+    if (model !== undefined && !/^[a-z0-9-]+:[^\s:]+$/.test(model)) throw new Error("Coding role models must be explicit provider:model values")
+  }
+  if (options.planning !== undefined && !options.planning.reviewer.trim()) {
+    throw new Error("Planning requires an explicit wiki reviewer policy identity")
   }
   if (!/^(?!00000000-0000-0000-0000-000000000000$)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(options.gatewayId)) {
     throw new Error("A configured coding host requires its owning SMITHERS_GATEWAY_ID")
@@ -45,11 +54,16 @@ const configured = (options: Options) => {
 }
 
 /** Resolves the role through the existing workspace/user credential route. */
-export const roleResolver = (base: SeatResolver.Service, implementationModel: string, planningModel = implementationModel): SeatResolver.Service => SeatResolver.make({
-  resolve: id => base.resolve(id === role ? implementationModel : id === "coding/plan" ? planningModel : id).pipe(
-    Effect.map(seat => id === role || id === "coding/plan" ? Seat.make({ ...seat, id }) : seat)
-  )
-})
+export const roleResolver = (base: SeatResolver.Service, implementationModel: string,
+  models: Pick<Options, "planningModel" | "pocModel" | "wikiModel"> = {}): SeatResolver.Service => {
+  const roles: Readonly<Record<string, string>> = { "coding/implement": implementationModel,
+    "coding/plan": models.planningModel ?? implementationModel,
+    "coding/poc": models.pocModel ?? implementationModel,
+    "wiki/reviewer": models.wikiModel ?? implementationModel }
+  return SeatResolver.make({ resolve: id => base.resolve(Object.hasOwn(roles, id) ? roles[id]! : id).pipe(
+    Effect.map(seat => Object.hasOwn(roles, id) ? Seat.make({ ...seat, id }) : seat)
+  ) })
+}
 
 /** Both platform entries call this one recipe; no second executor or store. */
 export const layer = (platform: NativeControl.Platform, options: Options, suppliedSeats?: SeatResolver.Service) => {
@@ -61,16 +75,20 @@ export const layer = (platform: NativeControl.Platform, options: Options, suppli
       Effect.orDie
     )
   }, environment => Layer.effect(SeatResolver.SeatResolver)(
-    Effect.map(SeatResolver.SeatResolver, base => roleResolver(base, options.implementationModel, options.planningModel))
+    Effect.map(SeatResolver.SeatResolver, base => roleResolver(base, options.implementationModel, options))
   ).pipe(Layer.provide(suppliedSeats === undefined ? NativeEquipment.layerSeatResolver(environment) : SeatResolver.layer(suppliedSeats))))
   return Layer.suspend(() => Layer.unwrap(Effect.gen(function*() {
-    // Only scratch creation and cleanup receive the existing trusted host FS.
-    // Check processes and all agent tools retain the native host's guards.
+    // Host-owned immutable wiki publication and scratch cleanup use the trusted
+    // FS. Model actions and check processes retain the native host's guards.
     const fs = yield* FileSystem.FileSystem
     const request = options.planning === undefined ? Layer.empty : Layer.mergeAll(
-      memoryLayer({ ...options.planning, repositoryPath: options.repositoryPath }),
+      memoryLayer({ ...options.planning, repositoryPath: options.repositoryPath }, fs),
+      planningWikiLayers({ ...options.planning, repositoryPath: options.repositoryPath,
+        reviewer: Digest.canonical({ policy: options.planning.reviewer, model: options.wikiModel ?? options.implementationModel,
+          gateway: options.gatewayId }) }, fs),
       planningPolicy, Interpreter.layer(PreparePlan), HumanTask.layer, correctionLayers, sourceAdmission, requestRegistration,
-      evidenceOnly(Layer.mergeAll(ReviewRequest.layer, DraftPlan.layer, SelectRepair.layer))
+      pocPolicy, pocModels, pocSource({ ...options, fs }),
+      evidenceOnly(Layer.mergeAll(ReviewRequest.layer, DraftPlan.layer, SelectRepair.layer, ReviewPage.layer))
     )
     const leaves = Layer.mergeAll(atomFlows, atomOperations, EditAtom.layer, nativeActions, request,
       checkLayers({ repositoryPath: options.repositoryPath, fs,

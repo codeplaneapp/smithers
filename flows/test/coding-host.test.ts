@@ -30,4 +30,13 @@ test("the coding role reuses the existing seat resolver and keeps the approved r
   const other = await Effect.runPromise(seats.resolve("test:other-model"))
   assert.equal(other.id, "test:other-model")
   assert.deepEqual(resolved, ["test:chosen-model", "test:other-model"])
+  const roles = roleResolver(base, "test:implementation", {
+    planningModel: "test:planning", pocModel: "test:cheap-prototype", wikiModel: "test:wiki-review"
+  })
+  for (const id of ["coding/implement", "coding/plan", "coding/poc", "wiki/reviewer", "constructor"]) {
+    assert.equal((await Effect.runPromise(roles.resolve(id))).id, id)
+  }
+  assert.deepEqual(resolved.slice(2), ["test:implementation", "test:planning", "test:cheap-prototype", "test:wiki-review", "constructor"])
+  for (const id of ["coding/plan", "coding/poc", "wiki/reviewer"]) await Effect.runPromise(seats.resolve(id))
+  assert.deepEqual(resolved.slice(-3), ["test:chosen-model", "test:chosen-model", "test:chosen-model"])
 })

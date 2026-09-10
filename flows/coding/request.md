@@ -24,26 +24,56 @@ executor. The host advertises `coding-request/v1` only when its operator has
 provided the owning planning configuration and its verified declaration is
 available in the catalog.
 
-The current composition prepares a plan from verified repository memory,
-asks any material question through the existing durable HumanTask, admits its
-observed native source, and calls the bounded correction workflow. Each stage
-and its output belong to ordinary native execution records. The correction
-result's product status is distinct from the surrounding engine's completion:
-`blocked` carries the actual failed execution ID and does not assert validation.
+The composition refreshes the verified engineering wiki, prepares a first plan,
+admits its observed native source, and runs the disposable file-level POC. It
+checks that source again before refreshing memory and planning a second time
+with both the user's feedback and the measured POC findings. The second plan
+is admitted before the bounded correction workflow implements it. Any material
+planning question uses the existing durable HumanTask.
+
+Each stage and its output belong to ordinary native execution records. The
+complete POC source preview stays in its child result; the request result does
+not duplicate its bounded file contents in every ancestor. Only its bounded
+feedback feeds the second planning pass. The private planning input allows
+65,538 characters so a valid 32,768-character user message and 32,768-character
+POC feedback both survive with their separating newlines. The request's external
+feedback limit remains 32,768 characters.
+
+The correction result's product status is distinct from the surrounding engine's
+completion: `blocked` carries the actual failed execution ID and does not assert
+validation. A discarded POC is `drafted-unvalidated`; its source preview is not
+an executed browser, passing test, vibed state or delivery receipt.
 
 `Options.planning` configures the existing memory action with the repository's
 public engineering wiki pages and registered implementation/check names.
-`planningModel` optionally selects its existing authorized provider route;
-otherwise planning uses `implementationModel`. These are private operator
-options. The prompt cannot select a different source directory, reviewer,
-check executable, model credential or implementation digest.
+The required `reviewer` identifies the wiki review policy. Optional
+`planningModel`, `pocModel` and `wikiModel` select existing authorized provider
+routes; each defaults to the explicitly selected `implementationModel`. This
+allows a cheap prototype model without introducing another model client. The
+wiki reuse identity includes the operator's reviewer policy, selected review
+model and owning gateway. These are private operator options. The prompt cannot
+select a different source directory, reviewer, check executable, model credential
+or implementation digest.
 
 The host builds its verified executable catalog before providing that exact
 catalog to the planning and coding action layers. Declared source bytes are
-loaded using the host filesystem during startup; subsequent agent tools use
-the existing guarded filesystem and native file eligibility rules. The private
-native registration type exposes the injected JJ and SQL services already
-present in that runtime; it constructs neither another service nor connection.
+loaded using the host filesystem during startup. Host-owned wiki generation and
+memory verification also use that same injected filesystem for their configured
+paths, retaining the wiki's canonical source/output checks and semantic checks.
+The private wiki/memory recipes accept that filesystem explicitly at the operation
+boundary: native action execution can override construction-time layer context.
+These deterministic actions receive an operator-owned catalog; they do not offer
+filesystem access to a model. Agent tools continue to use the existing guarded
+filesystem and native file eligibility rules. The private native registration
+type exposes the injected JJ, SQL and attempt-store services already present in
+that runtime; it constructs neither another service nor connection. Wiki reuse
+reads the native execution journal and attempt store, not the Control stores.
+
+The private source-admission action returns the existing plan fields with a
+required observed head. Legacy plans remain readable elsewhere, but cannot enter
+this composed request without a freshly observed source. Admission compares JJ
+change/commit/tree/parent facts; the existing operation-level fences continue to
+guard later mutations. An admission check is not a lock for the whole run.
 
 Planning, owner-repair selection and review actions are composed with the
 captured-evidence authority helper. They retain model routing, budget,
@@ -54,12 +84,11 @@ tools, fast gates and asynchronous immutable-source slow checks.
 
 The configured-host acceptance fixture drives the actual gateway host's
 Control API with scripted models, real QuickJS cells, Plue JJ, SQLite and
-process checks. It asserts that planning cannot write, implementation can use
-Write/Edit/ApplyPatch, ignored files are refused, and the persisted request
-result identifies both the original observed source and the validated native
-atom. It runs with both Node and Bun platform services. Scripted output is not
-a live-provider quality evaluation.
-
-Upstream wiki regeneration and disposable POC/replanning are separate private
-flows being composed into this request entry. This initial integration does
-not yet claim that they ran, that a plan was vibed, or that code shipped.
+process checks. It starts without a published wiki and asserts generation before
+planning, unchanged-page review reuse before the second pass, retained user and
+POC feedback, and actual native implementation. Evidence-only model steps cannot
+write. Implementation uses Write/Edit/ApplyPatch; ignored files are refused.
+The persisted request result identifies the original observed source and the
+validated native atom. The same source and bundle fixture selects either Node
+or Bun platform services. Scripted output is not a live-provider quality
+evaluation. Final commit cleanup, vibed state and delivery are later stages.

@@ -44,7 +44,7 @@ import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Discovery from "@smthrs/registry/Discovery"
 import * as Executable from "@smthrs/registry/Executable"
 import * as Registry from "@smthrs/registry/Registry"
-import { Ownership, RunStore } from "@smthrs/run-store"
+import { AttemptStore, Ownership, RunStore } from "@smthrs/run-store"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
 import * as Container from "@smthrs/std/Container"
 import * as NativeSearch from "@smthrs/std/NativeSearch"
@@ -93,6 +93,7 @@ export type ModuleRegistration = Layer.Layer<
   | Path.Path
   | KernelJj.Jj
   | SqlClient
+  | AttemptStore.AttemptStore
   | KernelChildProcessSpawner.ChildProcessSpawner
   | Budget.Budget
   | QuotaPolicy.QuotaClassifier

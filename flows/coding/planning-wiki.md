@@ -38,6 +38,12 @@ only a hint to its earlier wiki child execution. The first generation invokes
 Those existing flows collect exact source bytes and perform semantic review,
 assessment and immutable publication through their ordinary actions.
 
+The configured `coding/request` runs this dependency twice: before first
+planning and again after the disposable POC. The latter refresh normally reuses
+the unchanged reviewed pages. The host includes the selected wiki model and
+owning gateway in the operator's reviewer identity, so changing those routes
+invalidates reuse through this same protocol.
+
 The configuration scope hashes the complete PageSpec catalog, reviewer identity,
 canonical source root, configured output path, composition policy and lookup
 limits. Source bytes are separately measured by the existing Collect action.

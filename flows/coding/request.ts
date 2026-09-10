@@ -4,14 +4,21 @@ import { Node } from "@smthrs/plan"
 import * as Executable from "@smthrs/registry/Executable"
 import { Effect, Layer, Option, Schema } from "effect"
 import { CorrectPlan } from "./correction.ts"
-import { PreparePlan } from "./planning.ts"
+import { PrepareWithWiki } from "./planning-wiki.ts"
 import { CodingError, RequestInput, RequestResult } from "./schema.ts"
 export { RequestInput } from "./schema.ts"
 import { AdmitSource } from "./source-admission.ts"
+import { Poc } from "./poc.ts"
 
 export const Request = Flow.make("coding/Request", {
-  payload: RequestInput, success: RequestResult, error: PreparePlan.errorSchema,
-  body: input => PreparePlan.child({ prompt: input.prompt, feedback: input.feedback ?? "" }).pipe(
+  payload: RequestInput, success: RequestResult, error: PrepareWithWiki.errorSchema,
+  body: input => PrepareWithWiki.child({ prompt: input.prompt, feedback: input.feedback ?? "" }).pipe(
+    Node.bindPlanned(plan => AdmitSource.call({ plan })),
+    Node.bindPlanned(plan => Poc.child({ plan, source: plan.observedHead }).pipe(
+      Node.bindPlanned(poc => AdmitSource.call({ plan }).pipe(Node.andThen(Node.succeed(poc.feedback))))
+    )),
+    Node.map(feedback => input.feedback ? `${input.feedback}\n\n${feedback}` : feedback),
+    Node.bindPlanned(feedback => PrepareWithWiki.child({ prompt: input.prompt, feedback })),
     Node.bindPlanned(plan => AdmitSource.call({ plan })),
     Node.bindPlanned(plan => Node.all({ plan: Node.succeed(plan), outcome: CorrectPlan.child({ plan, maxRounds: input.maxRounds ?? 3 }) }))
   )

@@ -1,13 +1,13 @@
 /** Request admission uses captured JJ source facts, never a silently refreshed tip. */
 import { Action } from "@smthrs/flow"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import * as Jj from "../../packages/smithers/flows/jj/src/Jj.ts"
 import { NativeCoding } from "./native.ts"
 import { sameCode } from "./planning.ts"
-import { CodingError, Plan, validatePlan } from "./schema.ts"
+import { CodingError, Plan, Revision, validatePlan } from "./schema.ts"
 
 export const AdmitSource = Action.make("coding/admit-prepared-source", {
-  payload: { plan: Plan }, success: Plan, error: CodingError, nondeterministic: true
+  payload: { plan: Plan }, success: Schema.Struct({ ...Plan.fields, observedHead: Revision }), error: CodingError, nondeterministic: true
 })
 
 /** The existing per-operation native fences still guard every later mutation. */
@@ -24,7 +24,7 @@ export const admitSource = (plan: Plan) => Effect.gen(function*() {
       !base || base.kind !== "resolved" || !sameCode(base, plan.base)) {
     return yield* new CodingError({ code: "stale_revision", message: "Native source changed after this plan; gather and plan again before implementation" })
   }
-  return plan
+  return { ...plan, observedHead: plan.observedHead }
 }).pipe(Effect.mapError(error => error instanceof CodingError ? error : new CodingError({
   code: "stale_revision", message: "Prepared source could not be verified: " + (error instanceof Error ? error.message : String(error))
 })))
