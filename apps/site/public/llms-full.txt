@@ -38777,8 +38777,11 @@ dependency references resolved to previously derived keys in topological order.
 Non-sealed material becomes a run-local ordinal key, scoped to
 `options.runId`, which defaults to `"plan"`.
 
-The compiler is [`@smthrs/plan`](/docs/reference/api/plan/)'s, so the keys asserted here are
-the keys the persisted plan records.
+The compiler is [`@smthrs/plan`](/docs/reference/api/plan/)'s, so a sealed node's key here is
+the key the persisted plan records. A non-sealed node's is not: `Plan.compile`
+fingerprints every declaration with `StepKey.planIdentity`, which keys a
+non-sealed tier in the `plan-declaration` namespace, while this helper keys it
+as the run-local `ordinal` the engine dispatches under.
 
 ### Plan.make
 

@@ -114,11 +114,14 @@ const canonical = (value: unknown, seen: Set<object> = new Set()): unknown => {
  * dependency references resolved to previously derived keys in topological
  * order. Non-sealed material becomes a run-local ordinal key.
  *
- * The compiler is `@smthrs/plan`'s — the revived `KeyMaterial` → `StepKey`
- * module that owns `Ref`/`Pending` substitution — so the keys asserted here are
- * the keys the persisted plan records. It hashes through the injected `Crypto`
- * service; the synchronous crypto service keeps plan projection pure and total
- * under `TestLayers.poisoned`.
+ * The compiler is `@smthrs/plan`'s, so a sealed node's key here is the key the
+ * persisted plan records. A non-sealed node's is not: `Plan.compile`
+ * fingerprints every declaration with `StepKey.planIdentity`, which keys a
+ * non-sealed tier in the `plan-declaration` namespace, while this helper keys
+ * it as the run-local `ordinal` the engine dispatches under.
+ *
+ * Keys hash through the injected `Crypto` service; the synchronous crypto
+ * service keeps plan projection pure and total under `TestLayers.poisoned`.
  *
  * @category constructors
  * @since 0.0.0
