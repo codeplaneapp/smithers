@@ -94,6 +94,65 @@ describe("bounded JSON admission", () => {
     }
   })
 
+  const encoded = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
+
+  it("admits trees exactly at the depth limit and refuses the level below it", () => {
+    const cases: ReadonlyArray<readonly [number, unknown, ReadonlyArray<string>]> = [
+      [0, true, []],
+      [1, { child: true }, ["child"]],
+      [1, [true], ["0"]],
+      [2, { child: [true] }, ["child", "0"]],
+      [3, [{ child: [true] }], ["0", "child", "0"]]
+    ]
+    for (const [depth, value, path] of cases) {
+      expect(accepted(value, { maxDepth: depth })).toMatchObject({ ok: true, value, bytes: encoded(value) })
+      expect(accepted(value, { maxDepth: depth - 1 })).toMatchObject({ ok: false, code: "depth", path })
+    }
+  })
+
+  it("admits trees exactly at the node limit and refuses one node more", () => {
+    const cases: ReadonlyArray<readonly [number, unknown, ReadonlyArray<string>]> = [
+      [1, true, []],
+      [1, {}, []],
+      [3, [1, 2], ["1"]],
+      [2, { a: 0 }, []],
+      [3, { left: { a: 0 } }, ["left"]],
+      [4, [{ a: 0 }, 1], ["1"]]
+    ]
+    for (const [nodes, value, path] of cases) {
+      expect(accepted(value, { maxNodes: nodes })).toMatchObject({ ok: true, value, bytes: encoded(value) })
+      expect(accepted(value, { maxNodes: nodes - 1 })).toMatchObject({ ok: false, code: "nodes", path })
+    }
+  })
+
+  it("admits object keys exactly at the key byte limit and refuses one byte more", () => {
+    for (const key of ["", "a", "\n", "é", "€", "😀"]) {
+      const value = { [key]: 1 }
+      expect(accepted(value, { maxKeyBytes: encoded(key) }))
+        .toMatchObject({ ok: true, value, bytes: encoded(value) })
+      expect(accepted(value, { maxKeyBytes: encoded(key) - 1 }))
+        .toMatchObject({ ok: false, code: "key", path: [key] })
+    }
+    // A nested key is measured against the same limit as the key holding it.
+    expect(accepted({ a: { é: 1 } }, { maxKeyBytes: 4 })).toMatchObject({ ok: true })
+    expect(accepted({ a: { é: 1 } }, { maxKeyBytes: 3 })).toMatchObject({ ok: false, code: "key", path: ["a", "é"] })
+  })
+
+  it("admits mixed containers exactly at the cumulative member limit and refuses one member more", () => {
+    const cases: ReadonlyArray<readonly [number, unknown, ReadonlyArray<string>]> = [
+      [0, {}, []],
+      [0, [], []],
+      [3, [1, 2, 3], []],
+      [2, { empty: [], nested: {} }, []],
+      [5, { left: [1, 2], right: { a: 1 } }, ["right"]],
+      [5, [{ a: 1 }, [2, 3]], ["1"]]
+    ]
+    for (const [total, value, path] of cases) {
+      expect(accepted(value, { maxTotalMembers: total })).toMatchObject({ ok: true, value, bytes: encoded(value) })
+      expect(accepted(value, { maxTotalMembers: total - 1 })).toMatchObject({ ok: false, code: "members", path })
+    }
+  })
+
   it("refuses impossible array lengths before they can reduce the cumulative member count", () => {
     const withLength = (length: number) =>
       new Proxy([], {
