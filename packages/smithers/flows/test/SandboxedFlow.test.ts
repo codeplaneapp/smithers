@@ -359,6 +359,8 @@ const limitedGuest = (options: {
     }
     const reads: Array<string> = []
     const streamed: Array<{ path: string; bytesToRead: unknown }> = []
+    /** Every path a workspace walk statted, and how many stats overlapped. */
+    const walk = { paths: [] as Array<string>, live: 0, peak: 0 }
     let attempt = ""
     const nativeStream: FileSystem.FileSystem["stream"] = (path, settings) => {
       streamed.push({ path, bytesToRead: settings?.bytesToRead })
@@ -379,14 +381,28 @@ const limitedGuest = (options: {
           files: {
             ...session.files,
             stat: (path) =>
-              fs.stat(path).pipe(Effect.map((info) => ({
-                ...info,
-                size: FileSystem.Size(
-                  path.endsWith("result.json")
-                    ? options.resultSize ?? Number(info.size)
-                    : options.staleSize ?? Number(info.size)
-                )
-              }))),
+              Effect.gen(function*() {
+                walk.paths.push(path)
+                walk.live++
+                walk.peak = Math.max(walk.peak, walk.live)
+                // A scheduling point: without one, a stat that resolves in the
+                // same tick makes a concurrent walk indistinguishable from a
+                // serial one, which is the regression this observes.
+                yield* Effect.sleep("2 millis")
+                return yield* fs.stat(path)
+              }).pipe(
+                Effect.ensuring(Effect.sync(() => {
+                  walk.live--
+                })),
+                Effect.map((info) => ({
+                  ...info,
+                  size: FileSystem.Size(
+                    path.endsWith("result.json")
+                      ? options.resultSize ?? Number(info.size)
+                      : options.staleSize ?? Number(info.size)
+                  )
+                }))
+              ),
             ...(options.native === false ? {} : { stream: nativeStream })
           },
           spawn: (command, settings) =>
@@ -413,7 +429,7 @@ const limitedGuest = (options: {
             })
         }))
     }
-    return { provider: wrapped, reads, streamed }
+    return { provider: wrapped, reads, streamed, walk }
   })
 
 describe("sandbox limit boundaries", () => {
@@ -482,6 +498,40 @@ describe("sandbox limit boundaries", () => {
       }
     }
   }
+
+  it.live("walks the workspace with bounded stat concurrency, not one file at a time", () =>
+    Effect.gen(function*() {
+      const guest = yield* limitedGuest({ files: Array<string>(40).fill("x") })
+      const result = yield* SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "snapshot-concurrency",
+        entry: pure,
+        collectDiff: true
+      })
+      expect(result.diff.length).toBe(40)
+      // Overlapping, and overlapping by a bounded amount: a serial walk peaks
+      // at one and an unbounded one peaks at the workspace's file count.
+      expect(guest.walk.peak).toBeGreaterThan(1)
+      expect(guest.walk.peak).toBeLessThanOrEqual(16)
+    }), 60_000)
+
+  it.live("stops the after walk once the changed-file limit is exceeded", () =>
+    Effect.gen(function*() {
+      const guest = yield* limitedGuest({ files: Array<string>(64).fill("x") })
+      const failure = yield* failureOf(SandboxedFlow.execute(pureEntry.Constant, { value: "ok" }, {
+        provider: guest.provider,
+        session: "changed-limit-short-circuit",
+        entry: pure,
+        collectDiff: true,
+        limits: { files: 2 }
+      }))
+      expect(failure.code).toBe("diff_overflow")
+      expect(failure.message).toContain("more than 2 files")
+      const walked = guest.walk.paths.filter((path) => /\/file-\d+$/.test(path))
+      expect(walked.length).toBeGreaterThan(2)
+      expect(walked.length).toBeLessThan(64)
+      expect(guest.reads).toEqual([])
+    }), 60_000)
 
   it.live("rejects a zero-byte result budget before downloading", () =>
     Effect.gen(function*() {
@@ -917,7 +967,7 @@ describe("SandboxedFlow.execute failures", () => {
         limits: { files: 2 }
       })
       expect(failure.code).toBe("diff_overflow")
-      expect(failure.message).toContain("changed 5 files; the limit is 2")
+      expect(failure.message).toContain("changed more than 2 files; the limit is 2")
     }), 60_000)
 
   it.live("refuses a diff with more bytes than the limit", () =>

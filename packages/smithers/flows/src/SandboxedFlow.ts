@@ -58,6 +58,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as Layer from "effect/Layer"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { randomUUID } from "node:crypto"
@@ -498,23 +499,72 @@ const expired = (deadline: Duration.Input): Effect.Effect<never, SandboxedFlowEr
       )
   )
 
-/** Sizes by workspace-relative path of every regular file outside the control directory. */
+/**
+ * How many workspace stats a snapshot keeps in flight.
+ *
+ * `Sandbox.fileSystem` answers `stat` with one session command per path when
+ * the provider exposes no native filesystem, so a serial walk pays one remote
+ * round trip per workspace file, twice per diff-enabled execution. The bound
+ * exists because the other direction is no better: an unbounded walk of a
+ * large workspace opens one guest process per file at once, which is how a
+ * provider's command limit is reached and how a machine runs out of process
+ * slots. Sixteen overlaps enough round trips to hide their latency while the
+ * count of live commands stays a constant the provider can absorb.
+ */
+const statConcurrency = 16
+
+/** The changed-file count limit an after-walk enforces while it walks. */
+interface ChangeBudget {
+  readonly before: ReadonlyMap<string, number>
+  readonly limit: number
+}
+
+const unlistable = (cause: PlatformError.PlatformError): SandboxedFlowError =>
+  failure("session_failed", `the workspace could not be listed: ${cause.message}`, cause)
+
+/**
+ * Sizes by workspace-relative path of every regular file outside the control
+ * directory.
+ *
+ * One listing, then the stats with bounded concurrency. The results keep the
+ * listing's order, so the diff a caller receives does not depend on which
+ * stat answered first.
+ *
+ * `changed` makes this the AFTER walk of a diff: an entry whose size differs
+ * from `changed.before` counts, and the walk fails as soon as more than
+ * `changed.limit` of them have been seen rather than statting the rest of a
+ * workspace whose diff is already refused.
+ */
 const snapshot = (
   files: FileSystem.FileSystem,
-  workdir: string
+  workdir: string,
+  changed?: ChangeBudget
 ): Effect.Effect<ReadonlyMap<string, number>, SandboxedFlowError> =>
   Effect.gen(function*() {
-    const entries = yield* files.readDirectory(workdir, { recursive: true })
+    const listed = yield* files.readDirectory(workdir, { recursive: true }).pipe(Effect.mapError(unlistable))
+    const entries = listed.filter((entry) => entry !== controlDirectory && !entry.startsWith(`${controlDirectory}/`))
+    let over = 0
+    const measure = (entry: string): Effect.Effect<number | undefined, SandboxedFlowError> =>
+      Effect.flatMap(files.stat(entry).pipe(Effect.mapError(unlistable)), (info) => {
+        if (info.type !== "File") return Effect.succeed(undefined)
+        const size = Number(info.size)
+        if (changed !== undefined && changed.before.get(entry) !== size && ++over > changed.limit) {
+          return Effect.fail(
+            failure(
+              "diff_overflow",
+              `the guest changed more than ${changed.limit} files; the limit is ${changed.limit}`
+            )
+          )
+        }
+        return Effect.succeed(size)
+      })
+    const measured = yield* Effect.forEach(entries, measure, { concurrency: statConcurrency })
     const sizes = new Map<string, number>()
-    for (const entry of entries) {
-      if (entry === controlDirectory || entry.startsWith(`${controlDirectory}/`)) continue
-      const info = yield* files.stat(entry)
-      if (info.type === "File") sizes.set(entry, Number(info.size))
+    for (const [index, size] of measured.entries()) {
+      if (size !== undefined) sizes.set(entries[index]!, size)
     }
     return sizes
-  }).pipe(
-    Effect.mapError((cause) => failure("session_failed", `the workspace could not be listed: ${cause.message}`, cause))
-  )
+  })
 
 /** Read at most the budget plus one byte, without the unbounded readFile transport. */
 const readBounded = (
@@ -566,7 +616,16 @@ const readBounded = (
     return result
   }))
 
-/** Reads every file the guest created or resized, within the limits. */
+/**
+ * Reads every file the guest created or resized, within the limits.
+ *
+ * The reads stay sequential on purpose, unlike the stats the walk overlaps.
+ * Each one is bounded by the budget the reads before it did NOT spend, which
+ * is what keeps a file that grew after the walk from carrying the aggregate
+ * past `diffBytes`. Concurrent reads would each have to start from the whole
+ * remaining budget, so the bytes a host can hold at once would become the
+ * budget times the concurrency rather than the budget.
+ */
 const collect = (
   session: Sandbox.Session,
   workdir: string,
@@ -575,12 +634,9 @@ const collect = (
   limits: ResolvedLimits
 ): Effect.Effect<ReadonlyArray<DiffEntry>, SandboxedFlowError> =>
   Effect.gen(function*() {
+    // The count limit is spent during the after walk, which refuses an
+    // oversized diff without statting the workspace to its end.
     const changed = [...after].filter(([path, size]) => before.get(path) !== size)
-    if (changed.length > limits.files) {
-      return yield* Effect.fail(
-        failure("diff_overflow", `the guest changed ${changed.length} files; the limit is ${limits.files}`)
-      )
-    }
     const total = changed.reduce((sum, [, size]) => sum + size, 0)
     if (total > limits.diffBytes) {
       return yield* Effect.fail(
@@ -776,7 +832,13 @@ export const execute = <
             )
           )
           const diff = options.collectDiff === true
-            ? yield* collect(session, workdir, before, yield* snapshot(files, workdir), limits)
+            ? yield* collect(
+              session,
+              workdir,
+              before,
+              yield* snapshot(files, workdir, { before, limit: limits.files }),
+              limits
+            )
             : []
           return { output, diff }
         })

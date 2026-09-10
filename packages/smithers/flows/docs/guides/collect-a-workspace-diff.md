@@ -49,6 +49,14 @@ someone accepts.
 The host lists the workspace before the guest runs and again after, and collects
 every path that is new or whose size changed.
 
+Each walk is one directory listing followed by the stats, and the stats run
+sixteen at a time. It matters because a provider with no native filesystem
+answers each `stat` with a session command in the guest, so a serial walk pays
+one remote round trip per workspace file, twice per execution. The bound is
+there for the other direction: an unbounded walk would open one guest process
+per file at once. Results keep the listing's order, so the order of
+`result.diff` does not depend on which stat answered first.
+
 That has one blind spot, and it is worth stating plainly: **a file rewritten in
 place at exactly its previous size is missed.** It can only happen on a
 reattached workspace, because a fresh workspace holds nothing but the protocol's
@@ -85,6 +93,11 @@ const bounded = SandboxedFlow.execute(Writer, { count: 3 }, {
 
 `SandboxedFlow.defaultLimits` is the resolved default object, readable if you
 want to derive from it.
+
+`files` is spent during the second walk: the walk fails as soon as it has seen
+more changed files than the bound allows, rather than statting the rest of a
+workspace whose diff is already refused. The message names the limit, not a
+total the walk stopped short of measuring.
 
 Exceeding a diff bound fails the execution with `diff_overflow`, and exceeding
 `resultBytes` fails it with `result_overflow`. Metadata sizes can refuse a read early. Readback stops at the remaining
