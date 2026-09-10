@@ -1,10 +1,12 @@
-/** Private staged /usr/local/bin/smithers entry for an owning Plue workspace. */
+/** Private staged /usr/local/bin/smithers-coding-host entry for an owning Plue workspace. */
 import { Effect } from "effect"
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import * as Serve from "../../packages/smithers/src/Serve.ts"
 import { packageVersion } from "../../packages/smithers/src/Version.ts"
 import { layer } from "./host.ts"
+import { loadProject } from "./project-config.ts"
+import type * as NativeControl from "../../packages/smithers/src/internal/NativeControl.ts"
 
 const parsed = parseArgs({ args: process.argv.slice(2), allowPositionals: true, options: {
   root: { type: "string" }, host: { type: "string", default: Serve.defaultBind.host },
@@ -14,8 +16,10 @@ const parsed = parseArgs({ args: process.argv.slice(2), allowPositionals: true, 
 if (parsed.values.version) {
   process.stdout.write(`${packageVersion}\n`)
 } else if (parsed.values.help) {
-  process.stdout.write("smithers serve --root <workspace> --host <host> --port <port> --listen\n" +
-    "Requires SMITHERS_GATEWAY_ID and SMITHERS_CODING_IMPLEMENT_MODEL; SMITHERS_API_KEY authenticates the existing gateway.\n")
+  process.stdout.write("smithers-coding-host serve --root <workspace> --host <host> --port <port> --listen\n" +
+    "Requires SMITHERS_GATEWAY_ID and SMITHERS_CODING_IMPLEMENT_MODEL; SMITHERS_API_KEY authenticates the existing gateway.\n" +
+    "SMITHERS_CODING_PROJECT explicitly selects project JSON for the prompt route.\n" +
+    "Optional SMITHERS_CODING_PLAN_MODEL, SMITHERS_CODING_POC_MODEL and SMITHERS_CODING_WIKI_MODEL select provider:model roles.\n")
 } else {
   if (parsed.positionals.length !== 1 || parsed.positionals[0] !== "serve") throw new Error("This configured workspace entry accepts the existing serve command")
   const root = resolve(parsed.values.root ?? process.cwd())
@@ -27,18 +31,27 @@ if (parsed.values.version) {
   if (refusal) throw refusal
   const options = { repositoryPath: root, gatewayId: process.env.SMITHERS_GATEWAY_ID ?? "",
     implementationModel: process.env.SMITHERS_CODING_IMPLEMENT_MODEL ?? "",
+    ...(process.env.SMITHERS_CODING_PLAN_MODEL === undefined ? {} : { planningModel: process.env.SMITHERS_CODING_PLAN_MODEL }),
+    ...(process.env.SMITHERS_CODING_POC_MODEL === undefined ? {} : { pocModel: process.env.SMITHERS_CODING_POC_MODEL }),
+    ...(process.env.SMITHERS_CODING_WIKI_MODEL === undefined ? {} : { wikiModel: process.env.SMITHERS_CODING_WIKI_MODEL }),
     ...(process.env.PATH === undefined ? {} : { checkEnvironment: { PATH: process.env.PATH } }) }
+  const run = (platform: NativeControl.Platform) => loadProject(root, process.env.SMITHERS_CODING_PROJECT).pipe(
+    Effect.flatMap(planning => Serve.host(bind, root).pipe(Effect.provide(layer(platform, {
+      ...options, ...(planning === undefined ? {} : { planning })
+    })))),
+    Effect.provide(platform.host)
+  )
   // Only the concrete platform boundary is dynamic. Policy, durable stores and
   // coding registration above are the same on Bun and Node.
   if ("Bun" in globalThis) {
     const [{ platform }, runtime] = await Promise.all([
       import("../../packages/smithers/src/internal/BunControl.ts"), import("@effect/platform-bun/BunRuntime")
     ])
-    runtime.runMain(Serve.host(bind, root).pipe(Effect.provide(layer(platform, options))))
+    runtime.runMain(run(platform))
   } else {
     const [{ platform }, runtime] = await Promise.all([
       import("../../packages/smithers/src/internal/NodeControlHost.ts"), import("@effect/platform-node/NodeRuntime")
     ])
-    runtime.runMain(Serve.host(bind, root).pipe(Effect.provide(layer(platform, options))))
+    runtime.runMain(run(platform))
   }
 }
