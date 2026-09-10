@@ -615,7 +615,13 @@ describe("the run trace's reader gestures and the pump's tail (spec 06 §5, §6)
     await controller.commands.runForAgent("runs.trace.view", "run-8 timeline")
     card = store.collections.cards.get("flow-run-run-8")
     expect(card?.kind === "run-trace" && card.payload.traceView).toBe("timeline")
-    expect([...store.collections.transitions.values()].filter((record) => record.type === "card.updated").at(-1)?.actor).toBe("smithers")
+    // The background pump may append a system update after this command.
+    // Assert the persisted gesture itself, not the last unrelated update.
+    expect([...store.collections.transitions.values()].some((record) => {
+      if (record.type !== "card.updated" || record.actor !== "smithers") return false
+      const payload = JSON.parse(record.payload)
+      return payload.id === "flow-run-run-8" && payload.patch?.payload?.traceView === "timeline"
+    })).toBe(true)
 
     // A re-open keeps the reader's view (§5): filter, selection, cursor and live tail survive.
     await controller.commands.run("runs.open", "run-8")
@@ -998,7 +1004,9 @@ describe("workspace-bound run cards", () => {
       return (body.workspaceId === workspaceB ? b : a).services.fetchImpl!(input, init)
     } }
     let controller = createAppController(store, unavailableRepositories, silentAgent(), services)
-    await signIn(store)
+    // The slash grammar recognizes a trailing repository beside text only
+    // when it is loaded. This makes the mismatch reach the gateway guard.
+    await signIn(store, [REPO, "other/repo"])
     await selectWorkspace(store)
     expect((await controller.commands.run("flow.run", "review-pr")).status).toBe("executed")
     await selectWorkspace(store, workspaceB)

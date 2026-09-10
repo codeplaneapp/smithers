@@ -1280,6 +1280,12 @@ export type AppTransition =
     result: string
   }
   | {
+    /* A failed background must remain dormant even if its journal is unreadable. */
+    type: "chain.lineage.retired"
+    actor: "system"
+    lineageId: string
+  }
+  | {
     /* One chain journal event appended; seq is per lineage (DESIGN.md §14). */
     type: "chain.event.appended"
     actor: "smithers" | "system"

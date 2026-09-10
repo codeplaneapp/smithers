@@ -16,7 +16,8 @@ import { localSocketProtocols } from "../runtime/LocalSession"
 import type { FrameHistoryPort } from "../runtime/FrameHistory"
 import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
-import { activeCatalogRepositoryId, activeRepositoryId, resolveTargetRepo } from "./RepoContext"
+import { activeCatalogRepositoryId, activeRepositoryId, knownRepositories, resolveTargetRepo } from "./RepoContext"
+import type { KnownRepositories } from "./RepoContext"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import { createSearchSeam } from "./seams/SearchSeam"
 import type { PaletteAnswer, SearchSeam } from "./seams/SearchSeam"
@@ -133,6 +134,12 @@ export interface AppController {
    * repository or before its projection has landed.
    */
   readonly repositoryFlows: () => RepositoryFlowCatalog | undefined
+  /**
+   * The repositories a trailing `owner/repo` token beside other text may
+   * name (RepoContext.ts knownRepositories): the slash grammar's check that
+   * `fix src/index.ts` keeps its path.
+   */
+  readonly knownRepositories: () => KnownRepositories
   readonly slashItems: (needle: string) => Array<SlashItem<CatalogItem>>
   readonly slashTree: (needle: string) => Array<SlashRow<CatalogItem>>
   readonly changeDraft: (draft: string) => void
@@ -1266,6 +1273,7 @@ export const createAppController = (
     exportStorageRecovery,
     bootstrap: services.bootstrap,
     repositoryFlows,
+    knownRepositories: () => knownRepositories(store),
     changeDraft,
     withAgentActor: <T>(work: () => Promise<T>): Promise<T> => work(),
     reset,
@@ -1625,6 +1633,7 @@ export const createAppController = (
     exportStorageRecovery,
     bootstrap: services.bootstrap,
     repositoryFlows,
+    knownRepositories: () => knownRepositories(store),
     downloadUrl,
     features,
     nativeAgentAvailable: agent.available,

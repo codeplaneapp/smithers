@@ -774,12 +774,14 @@ describe("command registry bindings", () => {
     expect((await controller.commands.run("connect")).status).toBe("executed")
     expect(store.session().surface).toBe("chat")
     expect((await controller.commands.run("wiki")).status).toBe("executed")
-    expect(store.session().surface).toBe("world")
+    expect(store.session().surface).toBe("chat")
+    expect(store.collections.cards.get("world-embedded")?.kind).toBe("world")
     expect((await controller.commands.run("wiki")).status).toBe("executed")
     expect(store.session().surface).toBe("chat")
-    // The hidden `world` alias toggles the same pane.
+    // The hidden `world` alias updates the same embedded Wiki card.
     expect((await controller.commands.run("world")).status).toBe("executed")
-    expect(store.session().surface).toBe("world")
+    expect(store.session().surface).toBe("chat")
+    expect([...store.collections.cards.values()].filter((card) => card.kind === "world")).toHaveLength(1)
     expect((await controller.commands.run("chat")).status).toBe("executed")
     expect(store.session().surface).toBe("chat")
 
@@ -966,7 +968,10 @@ describe("command registry bindings", () => {
     const { store, controller } = await freshController()
     controller.changeDraft("/world")
     controller.send(store.session().draft)
-    expect(store.session().surface).toBe("world")
+    const deadline = Date.now() + 2_000
+    while (!store.collections.cards.has("world-embedded") && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 1))
+    expect(store.collections.cards.get("world-embedded")?.kind).toBe("world")
+    expect(store.session().surface).toBe("chat")
     expect(store.session().draft).toBe("")
     expect([...store.collections.messages.values()].some((m) => m.text === "/world")).toBe(false)
   })

@@ -177,6 +177,8 @@ export interface CatalogItem extends FlowMetadata {
  */
 export interface FlowEntry<R = never> {
   readonly binding: FlowBinding.Binding<R>
+  /** Controller promises observe FlowCancellation and must settle before the binding returns. */
+  readonly cooperativeCancellation?: boolean
   readonly metadata: FlowMetadata
   /** The flow's input schema, kept beside the binding so the form derives from it (the descriptor does not carry it). */
   readonly input: Schema.Top

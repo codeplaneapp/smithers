@@ -19,6 +19,7 @@ import { readSqliteRecovery, StorageRecoveryError } from "../chain/StorageRecove
 import type { RecoveryTable, StorageRecoverySnapshot, EnumerableRecoveryStorage } from "../chain/StorageRecovery"
 import { captureBrowserStorageRecovery, recoveryStorage } from "./BrowserStorageRecovery"
 import { createCollectionPersistence, durableCollectionOptions } from "../chain/DurableCollection"
+import type { DurableRowSink } from "../chain/DurableCollection"
 import { retiredLineageKey } from "../chain/LineageRetirement"
 import type { CollectionPersistence } from "../chain/DurableCollection"
 import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY, matchesStoredStringId, openTransactionalStorage } from "../chain/TransactionalStorage"
@@ -276,6 +277,8 @@ export type PersistenceBackend =
     readonly close: () => Promise<void>
     /** Read on the owning connection, serialized with writes. Older injected hosts may refuse recovery. */
     readonly readRecovery?: () => Promise<ReadonlyArray<RecoveryTable>>
+    /** Normalized row writes. Older injected hosts only accept whole collections. */
+    readonly applyRows?: DurableRowSink["applyRows"]
   }
   | {
     readonly kind: "localStorage"
@@ -554,7 +557,8 @@ export const resolvePersistence = async (host: BrowserPersistenceHost = {
       abortBatch: sqlite.abortBatch,
       flush: sqlite.flush,
       close: sqlite.close,
-      readRecovery: sqlite.readRecovery
+      readRecovery: sqlite.readRecovery,
+      applyRows: sqlite.applyRows
     },
     mode: "opfs",
     degraded: false
@@ -1057,10 +1061,17 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
     persistedLocally.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION))
     resolvedBackend = { ...resolvedBackend, storage: transactional.storage }
   }
+  /* A normalized host takes row deltas, so an append costs its own rows rather
+   * than the whole retained collection. Whole-collection JSON stays the
+   * localStorage envelope's format, and any host without row writes. */
+  const rowSink = resolvedBackend.kind === "opfs" && resolvedBackend.applyRows !== undefined
+    ? { applyRows: resolvedBackend.applyRows }
+    : undefined
   const collectionPersistence = createCollectionPersistence({
     storage: storageOf(resolvedBackend) ?? memoryStorage(),
     batch: resolvedBackend.kind === "opfs" ? resolvedBackend : transactional,
-    ...(resolvedBackend.kind === "opfs" ? { flush: resolvedBackend.flush } : {})
+    ...(resolvedBackend.kind === "opfs" ? { flush: resolvedBackend.flush } : {}),
+    ...(rowSink === undefined ? {} : { rows: rowSink })
   })
   const collectionBackend = { ...resolvedBackend, collectionPersistence }
   const collections = Object.fromEntries(
@@ -1768,6 +1779,15 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
             draft.revision = revision
           })
           break
+
+        case "chain.lineage.retired": {
+          const id = retiredLineageKey(transition.lineageId)
+          if (!collections.retiredChainLineages.has(id)) collections.retiredChainLineages.insert({ id })
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
 
         case "chain.event.appended":
           collections.chainEvents.insert({
