@@ -34,6 +34,66 @@ describe("bounded JSON admission", () => {
     expect(accepted([{ a: 1 }, { b: 2 }], { maxTotalMembers: 3 })).toMatchObject({ ok: false, path: ["1"] })
   })
 
+  const wideObject = () => {
+    const input = Object.fromEntries(Array.from({ length: 100_000 }, (_, index) => [`k${index}`, 0]))
+    let descriptorsInspected = 0
+    const value = new Proxy(input, {
+      getOwnPropertyDescriptor: (target, key) => {
+        descriptorsInspected++
+        return Reflect.getOwnPropertyDescriptor(target, key)
+      }
+    })
+    return { value, inspections: () => descriptorsInspected }
+  }
+
+  it("stops collecting object descriptors at the per-container member limit", () => {
+    const observed = wideObject()
+    expect(accepted(observed.value, { maxMembers: 3 }))
+      .toMatchObject({ ok: false, code: "members", path: [] })
+    expect(observed.inspections()).toBeLessThanOrEqual(4)
+  })
+
+  it("stops collecting nested object descriptors at the remaining total member limit", () => {
+    const observed = wideObject()
+    // Two root members and one member in left leave room for two in right.
+    expect(accepted({ left: { a: 0 }, right: observed.value }, { maxTotalMembers: 5 }))
+      .toMatchObject({ ok: false, code: "members", path: ["right"] })
+    expect(observed.inspections()).toBeLessThanOrEqual(3)
+  })
+
+  it("stops collecting object descriptors at the remaining node limit", () => {
+    const observed = wideObject()
+    // The root, left, its value, and right have already consumed four nodes.
+    expect(accepted({ left: { a: 0 }, right: observed.value }, { maxNodes: 7 }))
+      .toMatchObject({ ok: false, code: "nodes", path: ["right"] })
+    expect(observed.inspections()).toBeLessThanOrEqual(4)
+  })
+
+  it("stops collecting object descriptors when minimum encoded bytes exceed the budget", () => {
+    for (const nested of [false, true]) {
+      const observed = wideObject()
+      const value = nested ? { left: { a: 0 }, right: observed.value } : observed.value
+      // Four members need at least 21 bytes. The nested case has spent 25 already.
+      expect(accepted(value, { maxBytes: nested ? 41 : 16 }))
+        .toMatchObject({ ok: false, code: "bytes", path: nested ? ["right"] : [] })
+      expect(observed.inspections()).toBeLessThanOrEqual(4)
+    }
+  })
+
+  it("admits objects exactly at their member, node, and encoded byte limits", () => {
+    for (const value of [{}, { "": 0 }, { a: 0, b: { "": 0 } }]) {
+      const members = Object.keys(value).length
+      const totalMembers = members + ("b" in value ? 1 : 0)
+      const bytes = Buffer.byteLength(JSON.stringify(value))
+      expect(accepted(value, {
+        maxMembers: members,
+        maxTotalMembers: totalMembers,
+        maxNodes: totalMembers + 1,
+        maxBytes: bytes
+      })).toMatchObject({ ok: true, bytes, value })
+    }
+  })
+
   it("refuses impossible array lengths before they can reduce the cumulative member count", () => {
     const withLength = (length: number) =>
       new Proxy([], {
@@ -86,6 +146,8 @@ describe("bounded JSON admission", () => {
     expect(accepted({ ["x".repeat(65)]: 1 })).toMatchObject({ ok: false })
     expect(accepted({ "\ud800": 1 })).toMatchObject({ ok: false })
     expect(accepted({ long: 1 }, { maxBytes: 4 })).toMatchObject({ ok: false })
+    // The minimum member cost fits, but the actual key exhausts the byte budget.
+    expect(accepted({ long: 1 }, { maxBytes: 6 })).toMatchObject({ ok: false, code: "bytes" })
   })
 
   it("enforces depth, node, member, and structural byte budgets", () => {
@@ -95,6 +157,8 @@ describe("bounded JSON admission", () => {
     expect(accepted({ a: 1, b: 2 }, { maxMembers: 1 })).toMatchObject({ ok: false })
     expect(accepted([], { maxBytes: 1 })).toMatchObject({ ok: false })
     expect(accepted({}, { maxBytes: 1 })).toMatchObject({ ok: false })
+    expect(accepted({}, { maxMembers: -1 })).toMatchObject({ ok: false, code: "members" })
+    expect(accepted({}, { maxTotalMembers: -1 })).toMatchObject({ ok: false, code: "members" })
     expect(accepted(null, { maxBytes: 3 })).toMatchObject({ ok: false })
     expect(accepted(true, { maxBytes: 3 })).toMatchObject({ ok: false })
     expect(accepted(false, { maxBytes: 4 })).toMatchObject({ ok: false })

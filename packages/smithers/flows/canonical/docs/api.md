@@ -194,6 +194,13 @@ including quotes and escapes. The snapshot is deeply frozen; objects have null
 prototypes. Sparse arrays, accessors, enumerable symbols, non-plain objects,
 cycles, non-JSON values, and malformed Unicode are refused.
 
+Object descriptor collection checks member limits before buffering each
+additional enumerable property. It also refuses when the minimum node or encoded
+byte cost of the members seen exceeds the remaining budget. `Reflect.ownKeys`
+still enumerates and materializes all own keys before these checks; skipped
+non-enumerable properties still require descriptor inspection. Bound raw input
+size outside admission to constrain that work.
+
 `BoundedJson.encodedStringBytes(value, maximum?)` counts a JSON string's UTF-8
 bytes without allocating its encoded copy, or returns `undefined` for malformed
 or oversized text. It counts the short control escapes exactly.

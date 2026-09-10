@@ -189,6 +189,15 @@ export const admit = (input: unknown, limits: Limits): Result => {
         if (descriptor === undefined || !descriptor.enumerable) continue
         if (typeof key !== "string") return refuse("symbol", "contains an enumerable symbol")
         if (!("value" in descriptor)) return refuse("accessor", "contains an accessor", [...path, key])
+        const count = members.length + 1
+        if (count > limits.maxMembers || totalMembers + count > (limits.maxTotalMembers ?? Infinity)) {
+          return refuse("members", "exceeds the JSON members limit")
+        }
+        if (nodes + count > limits.maxNodes) return refuse("nodes", `contains more than ${limits.maxNodes} JSON values`)
+        // Each member needs at least an empty key, a colon, and a one-byte value,
+        // in addition to the object's braces and commas. Charge exact bytes below.
+        const minimumBytes = 2 + (count - 1) + 4 * count
+        if (bytes + minimumBytes > (limits.maxBytes ?? Infinity)) return refuse("bytes", "exceeds the JSON byte limit")
         members.push([key, descriptor.value])
       }
       if (!countMembers(members.length)) return refuse("members", "exceeds the JSON members limit")
