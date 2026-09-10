@@ -4,7 +4,7 @@ import { assertRepoUnderMonthlyCap } from "../assertRepoUnderMonthlyCap.ts";
 import { lookupRepo } from "../sessions/lookupRepo.ts";
 import { anthropicEndpointAllowed } from "./anthropicEndpointAllowed.ts";
 import { authenticateProxyRequest } from "./authenticateProxyRequest.ts";
-import { completedUsage } from "./completedUsage.ts";
+import { teeForMetering } from "./teeForMetering.ts";
 import { randomTokenHex } from "../randomTokenHex.ts";
 import { modelPrices } from "./modelPrices.ts";
 import { priceRequest } from "./priceRequest.ts";
@@ -16,6 +16,8 @@ export interface HandleAnthropicDeps {
   anthropicBaseUrl: string;
   fetchUpstream: typeof fetch;
   now: () => number;
+  /** Deadline for upstream headers and body together; defaults to five minutes. */
+  streamTimeoutMs?: number;
   /**
    * Production: ctx.waitUntil from the Worker invocation, keeping the metering
    * write alive after the response stream closes. Tests pass a function that
@@ -50,12 +52,14 @@ type UpstreamResult =
 async function fetchUpstreamSameOrigin(
   fetchUpstream: typeof fetch,
   allowedOrigin: string,
+  signal: AbortSignal,
   initial: { url: string; method: string; headers: Headers; body: ArrayBuffer | undefined },
 ): Promise<UpstreamResult> {
   let { url, method, body } = initial;
   const headers = initial.headers;
   for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop++) {
-    const response = await fetchUpstream(url, { method, headers, body, redirect: "manual" });
+    signal.throwIfAborted();
+    const response = await fetchUpstream(url, { method, headers, body, redirect: "manual", signal });
     const location = response.headers.get("location");
     if (!REDIRECT_STATUSES.has(response.status) || !location) {
       return { kind: "response", response };
@@ -85,30 +89,9 @@ function pickForwardHeaders(source: Headers): Headers {
   return out;
 }
 
-function teeForMetering(upstream: Response): { passthrough: ReadableStream; collected: Promise<string> } {
-  const [a, b] = upstream.body!.tee();
-  const collected = (async () => {
-    const reader = b.getReader();
-    const decoder = new TextDecoder();
-    let acc = "";
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-      }
-      acc += decoder.decode();
-    } finally {
-      reader.releaseLock();
-    }
-    return acc;
-  })();
-  return { passthrough: a, collected };
-}
-
 /**
  * /anthropic/v1/messages — auth, forward to api.anthropic.com with the real
- * key, stream the response back unmodified, then meter from a teed copy. Only
+ * key, stream the response back unmodified, metering usage in a single pass. Only
  * the methods and paths in {@link anthropicEndpointAllowed} are forwarded: the
  * proxy is not a general egress, and the shared key it injects reaches every
  * object in the upstream workspace.
@@ -231,15 +214,34 @@ export async function handleAnthropic(
     return jsonError(503, "budget admission unavailable", { detail: String(err) });
   }
 
+  const abort = new AbortController();
+  const onAbort = () => abort.abort(request.signal.reason);
+  request.signal.addEventListener("abort", onAbort, { once: true });
+  if (request.signal.aborted) onAbort();
+  const deadline = setTimeout(
+    () => abort.abort(new DOMException("upstream stream deadline exceeded", "TimeoutError")),
+    deps.streamTimeoutMs ?? 5 * 60_000,
+  );
+  const cleanup = () => {
+    clearTimeout(deadline);
+    request.signal.removeEventListener("abort", onAbort);
+  };
+
   let upstream: Response;
   try {
-    const result = await fetchUpstreamSameOrigin(deps.fetchUpstream, new URL(deps.anthropicBaseUrl).origin, {
-      url: upstreamUrl,
-      method: request.method,
-      headers: upstreamHeaders,
-      body: priced.body,
-    });
+    const result = await fetchUpstreamSameOrigin(
+      deps.fetchUpstream,
+      new URL(deps.anthropicBaseUrl).origin,
+      abort.signal,
+      {
+        url: upstreamUrl,
+        method: request.method,
+        headers: upstreamHeaders,
+        body: priced.body,
+      },
+    );
     if (result.kind === "cross_origin_redirect") {
+      cleanup();
       // The injected key was NOT sent to (and never will be sent to) the
       // foreign origin; fail closed rather than forward credentials off-origin.
       return jsonError(502, "upstream redirected off the anthropic origin; refusing to forward credentials", {
@@ -247,14 +249,17 @@ export async function handleAnthropic(
       });
     }
     if (result.kind === "too_many_redirects") {
+      cleanup();
       return jsonError(502, "too many upstream redirects", { hops: result.hops });
     }
     upstream = result.response;
   } catch (err) {
+    cleanup();
     return jsonError(502, "upstream fetch failed", { detail: String(err) });
   }
 
   if (!upstream.body) {
+    cleanup();
     if (upstream.status >= 400) {
       await env.DB.prepare("DELETE FROM usage_reservations WHERE id = ?").bind(requestId).run();
     }
@@ -270,11 +275,10 @@ export async function handleAnthropic(
   }
 
   const contentType = upstream.headers.get("content-type") ?? "";
-  const { passthrough, collected } = teeForMetering(upstream);
+  const { passthrough, collected } = teeForMetering(upstream, contentType.includes("text/event-stream"), abort);
 
   const metering = (async () => {
-    const body = await collected;
-    const summary = completedUsage(body, contentType.includes("text/event-stream"));
+    const { summary, complete } = await collected.finally(cleanup);
     if (!summary) {
       // A definite upstream rejection spends no inference budget. Ambiguous
       // transport/2xx failures keep the hold; never reopen budget blindly.
@@ -309,6 +313,7 @@ export async function handleAnthropic(
       repo,
       pr,
       summary,
+      retainReservation: !complete,
       kind: contentType.includes("text/event-stream") ? "messages_stream" : "messages",
       now: deps.now(),
     });

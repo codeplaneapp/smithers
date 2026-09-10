@@ -33,6 +33,17 @@ across UTC month boundaries. This prevents a stalled or interrupted call from
 reopening budget that may already have been spent. Operators must reconcile
 unresolved holds against provider usage before removing them.
 
+Upstream requests have a five-minute deadline covering headers and response
+body. Request aborts and response cancellation stop upstream inference.
+Streaming metering follows client backpressure, keeps only cumulative usage
+and a bounded current SSE frame (64 KiB characters), and skips oversized
+content frames. Interrupted streams persist usage from complete frames
+already forwarded while retaining the full hold for reconciliation. The
+observed debit and hold both count against admission until reconciled.
+Incomplete streams that reach EOF without final usage keep the hold.
+Non-streaming JSON metering is limited to 1 MiB characters; larger responses
+still pass through and retain their hold for reconciliation.
+
 Operator API keys must authorize a registered repository. Their optional
 spend cap is a threshold on that repository's cumulative UTC calendar-month
 spend, including direct requests and sessions from any credential; it is not

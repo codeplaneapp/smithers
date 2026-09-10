@@ -212,7 +212,9 @@ test("in-flight cap holds ambiguous failures and releases definite rejections", 
       }),
       env,
     );
-  expect((await request()).status).toBe(429);
+  const rejected = await request();
+  expect(rejected.status).toBe(429);
+  await rejected.text();
   await Promise.all(pending);
   expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_reservations").first<{ n: number }>())?.n).toBe(0);
   const responses = await Promise.all(Array.from({ length: 6 }, request));

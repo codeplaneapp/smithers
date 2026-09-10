@@ -117,3 +117,40 @@ test("a failed session debit never commits an event or releases the hold", async
   expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_events").first<{ n: number }>())?.n).toBe(0);
   expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_reservations").first<{ n: number }>())?.n).toBe(1);
 });
+
+test("interrupted usage retries idempotently without releasing its budget hold", async () => {
+  const { env, options: base } = await setup();
+  const options = { ...base, retainReservation: true };
+  await env.DB.prepare(
+    "INSERT INTO usage_reservations (id, repo, session_hash, cost_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(options.requestId, options.repo, options.sessionHash, 0.5, options.now)
+    .run();
+  await env.DB.exec(
+    "CREATE TRIGGER fail_usage BEFORE INSERT ON usage_events BEGIN SELECT RAISE(ABORT, 'injected event failure'); END",
+  );
+  await expect(recordUsage(env.DB, options)).rejects.toThrow("injected event failure");
+  expect(
+    JSON.parse(
+      (await env.DB.prepare("SELECT settlement_json FROM usage_reservations").first<{ settlement_json: string }>())!
+        .settlement_json,
+    ),
+  ).toEqual(options);
+  await env.DB.exec("DROP TRIGGER fail_usage");
+  const { retryUsage } = await import("../../src/server/proxy/retryUsage.ts");
+  await retryUsage(env.DB, options.repo);
+  await retryUsage(env.DB, options.repo);
+  expect(
+    await env.DB.prepare("SELECT cost_usd, settlement_json FROM usage_reservations").first<{
+      cost_usd: number;
+      settlement_json: string | null;
+    }>(),
+  ).toEqual({
+    cost_usd: 0.5,
+    settlement_json: null,
+  });
+  expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_events").first<{ n: number }>())?.n).toBe(1);
+  expect(
+    (await env.DB.prepare("SELECT spent_usd FROM sessions").first<{ spent_usd: number }>())?.spent_usd,
+  ).toBeCloseTo(0.00153, 9);
+});

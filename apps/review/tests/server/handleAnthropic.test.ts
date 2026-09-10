@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { handleAnthropic } from "../../src/server/proxy/handleAnthropic.ts";
 import { sha256Hex } from "../../src/server/sha256Hex.ts";
 import { createReviewWorker } from "../../src/server/worker.ts";
 import type { ReviewWorkerEnv } from "../../src/server/env.ts";
@@ -298,7 +299,7 @@ describe("anthropic proxy", () => {
       env,
     );
     expect(res.status).toBe(200);
-    await res.text();
+    expect(await res.text()).toBe(sseUsageWithLargeBodyBeforeFinalUsage());
     await Promise.all(meterings);
 
     const row = await env.DB.prepare("SELECT * FROM usage_events").first<Record<string, unknown>>();
@@ -399,6 +400,38 @@ describe("anthropic proxy", () => {
     expect(usage.results.length).toBe(2);
     const session = await env.DB.prepare("SELECT spent_usd FROM sessions").first<{ spent_usd: number }>();
     expect(session?.spent_usd ?? 0).toBeCloseTo(2 * SINGLE_CALL_COST_USD, 6);
+  });
+
+  test("oversized JSON forwards unchanged and retains its unmetered hold", async () => {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    const body = JSON.stringify({
+      model: "claude-sonnet-4-6",
+      content: [{ type: "text", text: "x".repeat(1024 * 1024 + 1) }],
+      usage: { input_tokens: 300, output_tokens: 42 },
+    });
+    const pending: Promise<unknown>[] = [];
+    const worker = createReviewWorker({
+      jwksUrl: "unused",
+      anthropicBaseUrl: "https://anthropic.test",
+      now: Date.now,
+      waitUntil: (p) => pending.push(p),
+      fetchUpstream: (async () =>
+        new Response(body, { headers: { "content-type": "application/json" } })) as unknown as typeof fetch,
+    });
+    const response = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1024, messages: [] }),
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(body);
+    await Promise.all(pending);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_events").first<{ n: number }>())?.n).toBe(0);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_reservations").first<{ n: number }>())?.n).toBe(1);
   });
 
   test("meters non-streaming JSON response and records kind=messages", async () => {
@@ -912,4 +945,232 @@ describe("anthropic proxy", () => {
     expect(body.month).toMatch(/^\d{4}-\d{2}$/);
     expect(fixture.requests.length).toBe(0);
   });
+});
+
+describe("proxy stream lifecycle", () => {
+  async function streamingResponse(body: ReadableStream<Uint8Array>, signal?: AbortSignal, streamTimeoutMs?: number) {
+    const env = await buildTestEnv();
+    const token = await seedSession(env, REPO);
+    const pending: Promise<unknown>[] = [];
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const request = new Request("https://review.test/anthropic/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": token },
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1024, messages: [] }),
+      signal,
+    });
+    const response = await handleAnthropic(
+      request,
+      env,
+      {
+        anthropicBaseUrl: "https://anthropic.test",
+        now: Date.now,
+        streamTimeoutMs,
+        waitUntil: (p) => pending.push(p),
+        fetchUpstream: (async (_url, init) => {
+          signals.push(init?.signal);
+          return new Response(body, { headers: { "content-type": "text/event-stream" } });
+        }) as typeof fetch,
+      },
+      new URL(request.url),
+    );
+    expect(response.status).toBe(200);
+    return { env, pending, signals, response };
+  }
+
+  const start =
+    'event: message_start\ndata: {"type":"message_start","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":300,"output_tokens":1}}}\n\n';
+  const delta = 'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":7}}\n\n';
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  test("client cancellation cancels upstream and records only observed usage", async () => {
+    let cancelled = 0;
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        source = controller;
+      },
+      cancel() {
+        cancelled++;
+      },
+    });
+    const { response, env, pending, signals } = await streamingResponse(body);
+    const reader = response.body!.getReader();
+    source.enqueue(new TextEncoder().encode(start + delta));
+    await reader.read();
+    // This usage frame is incomplete and must not be included on cancellation.
+    source.enqueue(
+      new TextEncoder().encode('event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":999}}'),
+    );
+    await reader.read();
+    const cancellation = reader.cancel("client gone");
+    await tick();
+    const observedCancellation = cancelled;
+    // Ensure the broken tee can finish too, so the failing test leaves no work behind.
+    if (!cancelled) source.close();
+    await cancellation;
+    await Promise.all(pending);
+    expect(observedCancellation).toBe(1);
+    expect(signals[0]?.aborted).toBe(true);
+    const usage = await env.DB.prepare("SELECT * FROM usage_events").first<Record<string, unknown>>();
+    expect(usage?.input_tokens).toBe(300);
+    expect(usage?.output_tokens).toBe(7);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_reservations").first<{ n: number }>())?.n).toBe(1);
+  });
+
+  test("a slow client bounds upstream read-ahead", async () => {
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls++;
+        controller.enqueue(new TextEncoder().encode(pulls === 1 ? start : delta));
+        if (pulls === 100) controller.close();
+      },
+    });
+    const { response, pending } = await streamingResponse(body);
+    await tick();
+    const beforeRead = pulls;
+    const reader = response.body!.getReader();
+    await reader.read();
+    await tick();
+    const afterRead = pulls;
+    await reader.cancel();
+    await Promise.all(pending);
+    expect(beforeRead).toBeLessThanOrEqual(3);
+    expect(afterRead).toBeLessThanOrEqual(beforeRead + 1);
+  });
+
+  test("stream deadline cancels a stalled response and persists observed usage", async () => {
+    let cancelled = 0;
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        source = controller;
+      },
+      cancel() {
+        cancelled++;
+      },
+    });
+    const { response, pending, signals, env } = await streamingResponse(body, undefined, 40);
+    const reader = response.body!.getReader();
+    source.enqueue(new TextEncoder().encode(start + delta));
+    await reader.read();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const observedCancellation = cancelled;
+    if (!cancelled) source.close();
+    await reader.read().catch(() => undefined);
+    await Promise.all(pending);
+    expect(observedCancellation).toBe(1);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(
+      (await env.DB.prepare("SELECT output_tokens FROM usage_events").first<{ output_tokens: number }>())
+        ?.output_tokens,
+    ).toBe(7);
+  });
+
+  test("upstream failure persists usage already forwarded", async () => {
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        source = controller;
+      },
+    });
+    const { response, pending, signals, env } = await streamingResponse(body);
+    const reader = response.body!.getReader();
+    source.enqueue(new TextEncoder().encode(start + delta));
+    await reader.read();
+    source.error(new Error("upstream disconnected"));
+    await expect(reader.read()).rejects.toThrow("upstream disconnected");
+    await Promise.all(pending);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(
+      (await env.DB.prepare("SELECT output_tokens FROM usage_events").first<{ output_tokens: number }>())
+        ?.output_tokens,
+    ).toBe(7);
+  });
+
+  test("split UTF-8 and CRLF frames forward unchanged and retain cumulative cache usage", async () => {
+    const text = (SSE_USAGE_WITH_CACHE + '\nevent: ping\ndata: {"text":"hello 🌍"}\n\n').replaceAll("\n", "\r\n");
+    const bytes = new TextEncoder().encode(text);
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(bytes.subarray(offset, offset + 7));
+        offset += 7;
+        if (offset >= bytes.length) controller.close();
+      },
+    });
+    const { response, pending, env, signals } = await streamingResponse(body);
+    expect(await response.text()).toBe(text);
+    await Promise.all(pending);
+    const usage = await env.DB.prepare("SELECT * FROM usage_events").first<Record<string, unknown>>();
+    expect(usage?.input_tokens).toBe(10);
+    expect(usage?.output_tokens).toBe(42);
+    expect(usage?.cache_creation_tokens).toBe(200);
+    expect(usage?.cache_read_tokens).toBe(4000);
+    expect(signals[0]?.aborted).toBe(false);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_reservations").first<{ n: number }>())?.n).toBe(0);
+  });
+
+  test("incoming request abort cancels upstream while the client is idle", async () => {
+    const incoming = new AbortController();
+    let cancelled = 0;
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        source = controller;
+      },
+      cancel() {
+        cancelled++;
+      },
+    });
+    const { response, pending, signals } = await streamingResponse(body, incoming.signal);
+    source.enqueue(new TextEncoder().encode(start));
+    await tick();
+    incoming.abort(new Error("disconnected"));
+    await tick();
+    const observedCancellation = cancelled;
+    if (!cancelled) source.close();
+    await response.text().catch(() => undefined);
+    await Promise.all(pending);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(observedCancellation).toBe(1);
+  });
+});
+
+test("stream deadline covers a stalled upstream fetch", async () => {
+  const env = await buildTestEnv();
+  const token = await seedSession(env, REPO);
+  const request = new Request("https://review.test/anthropic/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": token },
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 10, messages: [] }),
+  });
+  let aborted = false;
+  const response = await handleAnthropic(
+    request,
+    env,
+    {
+      anthropicBaseUrl: "https://anthropic.test",
+      now: Date.now,
+      waitUntil: () => undefined,
+      streamTimeoutMs: 20,
+      fetchUpstream: ((_url, init) =>
+        new Promise((_resolve, reject) => {
+          const fallback = setTimeout(() => reject(new Error("test cleanup")), 100);
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              clearTimeout(fallback);
+              reject(init.signal?.reason);
+            },
+            { once: true },
+          );
+        })) as typeof fetch,
+    },
+    new URL(request.url),
+  );
+  expect(response.status).toBe(502);
+  expect(aborted).toBe(true);
 });

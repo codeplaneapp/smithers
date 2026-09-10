@@ -7,7 +7,7 @@ export interface RecordedUsage {
   recorded: boolean;
 }
 
-/** Commit the debit, idempotent ledger event and reservation release together. */
+/** Commit the debit and idempotent ledger event together, retaining interrupted-call holds. */
 export async function recordUsage(
   db: D1Database,
   options: {
@@ -19,6 +19,8 @@ export async function recordUsage(
     summary: UsageSummary;
     kind: "messages" | "messages_stream" | "other";
     now: number;
+    /** Interrupted inference records observed spend but keeps its conservative hold. */
+    retainReservation?: boolean;
   },
 ): Promise<RecordedUsage> {
   const price = modelPrices(options.summary.model);
@@ -63,7 +65,13 @@ export async function recordUsage(
         options.kind,
         options.now,
       ),
-    db.prepare("DELETE FROM usage_reservations WHERE id = ?").bind(options.requestId),
+    db
+      .prepare(
+        options.retainReservation
+          ? "UPDATE usage_reservations SET settlement_json = NULL WHERE id = ?"
+          : "DELETE FROM usage_reservations WHERE id = ?",
+      )
+      .bind(options.requestId),
   ]);
   return { costUsd, recorded: results[1].meta.changes === 1 };
 }
