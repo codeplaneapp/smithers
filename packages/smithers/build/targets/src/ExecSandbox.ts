@@ -483,7 +483,7 @@ export const validateWrites = (confinement: Plan, hostFacts: Host = host()): voi
  * granted whole, and its uncovered entries are listed for a deny rule that
  * follows the grant. The result admits exactly the declared set plus the
  * granted directories' future entries. A directory whose uncovered entry
- * still holds declared files deeper down is never folded over that entry,
+ * still holds a covered path deeper down is never folded over that entry,
  * the workspace root is never folded, and a host that cannot list a
  * directory leaves its files as they were. Covered means a declared read, a
  * declared write, or the private tmp.
@@ -505,6 +505,19 @@ const fold = (
       current = NodePath.dirname(current)
     }
   }
+  // An undeclared directory on the way down to a covered write or read-only
+  // path is not a candidate, so nothing else would stop its parent being
+  // folded over it. The deny that follows the grant names the directory, and
+  // because later rules win in SBPL it closes reads on the very subtree the
+  // plan grants a write to.
+  const holdsCovered = new Set<string>()
+  for (const path of alsoCovered) {
+    let current = NodePath.dirname(path)
+    while (insideRoot(root, current) && current !== root && !holdsCovered.has(current)) {
+      holdsCovered.add(current)
+      current = NodePath.dirname(current)
+    }
+  }
   const deepestFirst = [...candidates].sort((left, right) => right.length - left.length || (left < right ? -1 : 1))
   const promoted: Array<string> = []
   const denies: Array<string> = []
@@ -518,7 +531,7 @@ const fold = (
     for (const child of children) {
       const path = NodePath.join(directory, child)
       if (covered.has(path)) coveredCount += 1
-      else if (candidates.has(path)) partial = true
+      else if (candidates.has(path) || holdsCovered.has(path)) partial = true
       else uncovered.push(path)
     }
     if (partial || coveredCount === 0 || coveredCount < uncovered.length) continue
@@ -529,15 +542,39 @@ const fold = (
   return { reads: [...declared, ...promoted], denies }
 }
 
-/** Drops a path covered by another entry of the same set, keeping the set ordered. */
+/**
+ * Orders paths so that every subtree is contiguous and its root comes first.
+ *
+ * Comparing on the path plus its separator is what makes that hold: `a/b` and
+ * `a/b/c` sort around `a/b.ts`, because `.` precedes `/`, and a plain
+ * comparison would then put a sibling between an ancestor and its child.
+ */
+const bySubtree = (left: string, right: string): number => {
+  const leftKey = left + NodePath.sep
+  const rightKey = right + NodePath.sep
+  if (leftKey === rightKey) return 0
+  return leftKey < rightKey ? -1 : 1
+}
+
+/**
+ * Drops a path covered by another entry of the same set, keeping the set ordered.
+ *
+ * One sweep in subtree order carries the shallowest kept ancestor forward,
+ * because searching the kept set per path is quadratic in the sibling files a
+ * bubblewrap or Docker plan declares one by one.
+ */
 const collapse = (paths: ReadonlyArray<string>): ReadonlyArray<string> => {
-  const sorted = [...new Set(paths)].sort((left, right) => left.length - right.length || (left < right ? -1 : 1))
-  const kept: Array<string> = []
-  for (const path of sorted) {
-    if (kept.some((parent) => parent === path || path.startsWith(parent + NodePath.sep))) continue
-    kept.push(path)
+  const unique = [...new Set(paths)]
+  const kept = new Set<string>()
+  let ancestor: string | undefined
+  for (const path of [...unique].sort(bySubtree)) {
+    if (ancestor !== undefined && path.startsWith(ancestor + NodePath.sep)) continue
+    kept.add(path)
+    ancestor = path
   }
-  return kept
+  return unique.filter((path) => kept.has(path)).sort((left, right) =>
+    left.length - right.length || (left < right ? -1 : 1)
+  )
 }
 
 /**

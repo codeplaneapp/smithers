@@ -381,38 +381,6 @@ describe("plan", () => {
     expect(plan.readOnly).toEqual(["/work/ws/.flows/cache"])
   })
 
-  /**
-   * A write is the one declaration that would open a hole: binding a path
-   * that resolves outside the root would give the tool a writable window on
-   * the host. It is dropped, not anchored back inside and not refused, which
-   * is the same answer an escaping read gets.
-   */
-  it("drops a declared write and a read-only path that escape the root", () => {
-    const plan = planned(linux, {
-      writes: ["dist", "../outside", "../../etc/passwd"],
-      writeFiles: ["../outside/out.txt"],
-      readOnly: [".flows/cache", "../outside"]
-    })
-    expect(plan.writes).toEqual(["/work/ws/dist"])
-    expect(plan.readOnly).toEqual(["/work/ws/.flows/cache"])
-  })
-
-  /**
-   * A write is the one declaration that would open a hole: binding a path
-   * that resolves outside the root would give the tool a writable window on
-   * the host. It is dropped, not anchored back inside and not refused, which
-   * is the same answer an escaping read gets.
-   */
-  it("drops a declared write and a read-only path that escape the root", () => {
-    const plan = planned(linux, {
-      writes: ["dist", "../outside", "../../etc/passwd"],
-      writeFiles: ["../outside/out.txt"],
-      readOnly: [".flows/cache", "../outside"]
-    })
-    expect(plan.writes).toEqual(["/work/ws/dist"])
-    expect(plan.readOnly).toEqual(["/work/ws/.flows/cache"])
-  })
-
   it("collapses a path covered by a broader entry", () => {
     const plan = planned(
       host("linux", { bwrap: "/usr/bin/bwrap" }, ["/work/ws/src/a.ts", "/work/ws/src/b.ts"], [
@@ -421,6 +389,55 @@ describe("plan", () => {
       { reads: ["src", "src/a.ts", "src/b.ts"] }
     )
     expect(plan.reads).toEqual(["/work/ws/src"])
+  })
+
+  /**
+   * A sibling whose name extends the directory's own (`src.ts` against `src`)
+   * sorts between the directory and its files under a plain comparison, so a
+   * collapse that carries one ancestor forward must order by subtree.
+   */
+  it("collapses a covered path even when a sibling name sorts between it and its parent", () => {
+    const paths = ["/work/ws/src", "/work/ws/src.ts", "/work/ws/src-gen", "/work/ws/src/a.ts", "/work/ws/src/lib/b.ts"]
+    const plan = planned(
+      host("linux", { bwrap: "/usr/bin/bwrap" }, paths, ["/work/ws/src", "/work/ws/src-gen", "/work/ws/src/lib"]),
+      { reads: ["src/lib/b.ts", "src.ts", "src", "src-gen", "src/a.ts"] }
+    )
+    expect(plan.reads).toEqual(["/work/ws/src", "/work/ws/src.ts", "/work/ws/src-gen"])
+  })
+
+  /**
+   * Bubblewrap and Docker bind each declared path, so a plan for one package's
+   * sources holds thousands of sibling files. Searching the kept set for an
+   * ancestor of every one of them made planning quadratic, and planning runs
+   * synchronously before each confined execution.
+   */
+  it("collapses thousands of sibling files without scanning the kept set per path", () => {
+    const collapsing = (count: number): number => {
+      const relative = Array.from({ length: count }, (_, index) => `src/file${index}.ts`)
+      const present = new Set(relative.map((path) => `${root}/${path}`))
+      const facts: ExecSandbox.Host = {
+        platform: "linux",
+        executable: (name) => (name === "bwrap" ? "/usr/bin/bwrap" : undefined),
+        exists: (path) => path === root || present.has(path),
+        isDirectory: () => false,
+        isSymbolicLink: () => false,
+        realpath: (path) => path,
+        uid: 501,
+        gid: 20
+      }
+      const started = performance.now()
+      const plan = planned(facts, { reads: relative, writes: [], writeFiles: [], readOnly: [] })
+      const elapsed = performance.now() - started
+      expect(plan.reads).toHaveLength(count)
+      return elapsed
+    }
+    const small = collapsing(2_500)
+    const large = collapsing(10_000)
+    // Four times the paths costs about four times the work once the sweep is
+    // linear; the ancestor scan cost about sixteen. The ratio, not an absolute
+    // bound, is what survives a loaded machine.
+    expect(large).toBeLessThan(Math.max(small, 10) * 8)
+    expect(large).toBeLessThan(5_000)
   })
 
   it("records where a read that links out of the workspace really lives, and nothing for the rest", () => {
@@ -743,6 +760,45 @@ describe("folding declared files into directories", () => {
     expect(blind.readDenies).toEqual([])
   })
 
+  /**
+   * A write two levels down has an undeclared middle directory. Folding its
+   * parent whole would list that directory as uncovered, and because later
+   * rules win in SBPL the deny would close reads on the output directory the
+   * plan grants a write to: `--clean`, `emptyOutDir` and incremental reads
+   * would all fail with EPERM inside a granted tree.
+   */
+  it("never denies an ancestor of a declared write", () => {
+    const nested: Readonly<Record<string, ReadonlyArray<string>>> = {
+      "/work/ws": ["pkg"],
+      "/work/ws/pkg": ["src", "package.json", "tsconfig.json", "dist", "test"],
+      "/work/ws/pkg/src": ["a.ts"],
+      "/work/ws/pkg/dist": ["esm"],
+      "/work/ws/pkg/dist/esm": []
+    }
+    const nestedHost: ExecSandbox.Host = {
+      ...host(
+        "darwin",
+        { "/usr/bin/sandbox-exec": "/usr/bin/sandbox-exec" },
+        ["/work/ws/pkg/src/a.ts", "/work/ws/pkg/package.json", "/work/ws/pkg/tsconfig.json"],
+        Object.keys(nested)
+      ),
+      entries: (directory) => nested[directory]
+    }
+    const plan = planned(nestedHost, {
+      reads: ["pkg/src/a.ts", "pkg/package.json", "pkg/tsconfig.json"],
+      writes: ["pkg/dist/esm"],
+      writeFiles: [],
+      readOnly: []
+    })
+    expect(plan.writes).toEqual(["/work/ws/pkg/dist/esm"])
+    for (const deny of plan.readDenies) {
+      expect(plan.writes.some((write) => write === deny || write.startsWith(`${deny}/`))).toBe(false)
+    }
+    expect(plan.readDenies).toEqual([])
+    expect(plan.reads).toEqual(["/work/ws/pkg/src", "/work/ws/pkg/package.json", "/work/ws/pkg/tsconfig.json"])
+    expect(ExecSandbox.seatbelt(plan, nestedHost)).not.toContain("(subpath \"/work/ws/pkg/dist\")")
+  })
+
   it("leaves a directory alone when an uncovered entry still holds declared files below it", () => {
     const sparse: ExecSandbox.Host = {
       ...listingHost,
@@ -755,56 +811,6 @@ describe("folding declared files into directories", () => {
     expect(plan.reads).not.toContain("/work/ws/src/lib")
     expect(plan.reads).not.toContain("/work/ws/src")
     expect(plan.reads).toContain("/work/ws/src/lib/deep")
-  })
-
-  it("keeps a directory's declared files when the host cannot list that one directory", () => {
-    // `entries` answers for the workspace but not for one candidate: the
-    // deepest directory is neither promoted nor denied, and because it stays
-    // uncovered its parents cannot be folded over it either.
-    const unlistable: ExecSandbox.Host = {
-      ...listingHost,
-      entries: (directory) => (directory === "/work/ws/src/lib/deep" ? undefined : listing[directory])
-    }
-    const plan = planned(unlistable, { reads, writes: [] })
-    expect([...plan.reads].sort()).toEqual([...files].sort())
-    expect(plan.readDenies).toEqual([])
-  })
-
-  it("keeps a directory's declared files when the host lists that directory as empty", () => {
-    // An empty listing is not evidence that the declaration covers the
-    // directory, so it is treated exactly like an unreadable one.
-    const emptied: ExecSandbox.Host = {
-      ...listingHost,
-      entries: (directory) => (directory === "/work/ws/src/lib/deep" ? [] : listing[directory])
-    }
-    const plan = planned(emptied, { reads, writes: [] })
-    expect([...plan.reads].sort()).toEqual([...files].sort())
-    expect(plan.readDenies).toEqual([])
-  })
-
-  it("keeps a directory's declared files when the host cannot list that one directory", () => {
-    // `entries` answers for the workspace but not for one candidate: the
-    // deepest directory is neither promoted nor denied, and because it stays
-    // uncovered its parents cannot be folded over it either.
-    const unlistable: ExecSandbox.Host = {
-      ...listingHost,
-      entries: (directory) => (directory === "/work/ws/src/lib/deep" ? undefined : listing[directory])
-    }
-    const plan = planned(unlistable, { reads, writes: [] })
-    expect([...plan.reads].sort()).toEqual([...files].sort())
-    expect(plan.readDenies).toEqual([])
-  })
-
-  it("keeps a directory's declared files when the host lists that directory as empty", () => {
-    // An empty listing is not evidence that the declaration covers the
-    // directory, so it is treated exactly like an unreadable one.
-    const emptied: ExecSandbox.Host = {
-      ...listingHost,
-      entries: (directory) => (directory === "/work/ws/src/lib/deep" ? [] : listing[directory])
-    }
-    const plan = planned(emptied, { reads, writes: [] })
-    expect([...plan.reads].sort()).toEqual([...files].sort())
-    expect(plan.readDenies).toEqual([])
   })
 
   it("keeps a directory's declared files when the host cannot list that one directory", () => {
