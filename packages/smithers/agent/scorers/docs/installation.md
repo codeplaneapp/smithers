@@ -87,6 +87,19 @@ this standalone file after the store closes; no engine tables or separate
 migration step are required. `Migrations.layer` performs the same bootstrap
 and migrations without building a store.
 
+## Workspace artifacts
+
+Workspace imports resolve to `src`. Run `pnpm run build` in this package to
+regenerate ESM, CommonJS, declarations, and source maps under `dist`.
+
+Repository release packing uses `scripts/pack-release.mjs`. Before staging each
+package, it deletes `dist` and runs that package's build script. A failed or
+missing build script stops packing even when all export targets already exist.
+The release workflow also rebuilds clean artifacts before entering this gate.
+Run local packing after source changes have landed; earlier ignored artifacts
+are replaced, and a later source edit requires another build before direct
+consumption of `dist`.
+
 ## Next step
 
 Score two executions, persist them, and read the aggregate back in the

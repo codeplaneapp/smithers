@@ -17,6 +17,7 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { libraryPackages, packageKey } from "./workspace-packages.mjs"
 import { assertPackedExportTargets } from "./packed-export-targets.mjs"
+import { buildRelease } from "./build-release.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -443,7 +444,11 @@ export const defaultBindings = (source) => {
   return sites.sort((a, b) => a.line - b.line)
 }
 
-const assertBuilt = async (packageRoot, manifest) => {
+/** Rebuild before packing: existing export targets do not prove source freshness. */
+export const assertBuilt = async (packageRoot, manifest) => {
+  // Use the release builder's clean, fail-closed invocation of the package's
+  // own build program. This also covers packing outside the release workflow.
+  buildRelease(packageRoot, new Map([[".", manifest]]))
   const sourceRoot = join(packageRoot, "src")
   const esmOnly = esmOnlyModules(manifest)
   for (const source of await sourceFiles(sourceRoot)) {

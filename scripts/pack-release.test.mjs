@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { assertExportTargets, assertPackedExportTargets } from "./packed-export-targets.mjs"
 import { assertEffectPins, effectDeclarations, effectLockVersions, installedEffectResolutions } from "./check-single-effect-version.mjs"
 import {
+  assertBuilt,
   defaultBindings,
   dependencyOrder,
   esmOnlyModules,
@@ -784,3 +785,55 @@ test("a directory or symbolic link in a real tarball cannot satisfy an exported 
     }
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
+
+// Complete artifacts alone cannot establish that source edits were compiled.
+const staleBuildFixture = async (body) => {
+  const directory = await mkdtemp(join(tmpdir(), "smithers-pack-stale-"))
+  try {
+    const manifest = {
+      name: "smithers-pack-stale-fixture", version: "1.0.0", type: "module",
+      packageManager: "pnpm@11.25.0",
+      scripts: { build: "node build.mjs" },
+      publishConfig: { exports: { ".": {
+        types: "./dist/esm/index.d.ts", import: "./dist/esm/index.js", require: "./dist/cjs/index.js"
+      } } }
+    }
+    await mkdir(join(directory, "src"))
+    await mkdir(join(directory, "dist/esm"), { recursive: true })
+    await mkdir(join(directory, "dist/cjs"), { recursive: true })
+    await writeFile(join(directory, "package.json"), JSON.stringify(manifest))
+    await writeFile(join(directory, "src/index.ts"), "export const reason = 'redacted'\n")
+    for (const file of ["esm/index.js", "esm/index.d.ts", "cjs/index.js"]) {
+      await writeFile(join(directory, "dist", file), "export const reason = 'secret'\n")
+    }
+    execFileSync("pnpm", ["install", "--offline", "--ignore-scripts"], { cwd: directory, stdio: "pipe" })
+    await body(directory, manifest)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+test("pack boundary refuses complete stale artifacts when rebuilding fails", () => staleBuildFixture(async (directory, manifest) => {
+  await writeFile(join(directory, "build.mjs"), "process.exit(23)")
+  await assert.rejects(assertBuilt(directory, manifest), /build failed \(exit 23\)/)
+}))
+
+test("pack boundary rebuilds complete stale artifacts from current source", () => staleBuildFixture(async (directory, manifest) => {
+  await writeFile(join(directory, "build.mjs"), [
+    'import assert from "node:assert/strict"',
+    'import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"',
+    'assert.equal(existsSync("dist"), false, "packing must clean stale output")',
+    'mkdirSync("dist/esm", { recursive: true })',
+    'mkdirSync("dist/cjs", { recursive: true })',
+    'for (const file of ["esm/index.js", "esm/index.d.ts", "cjs/index.js"]) writeFileSync("dist/" + file, readFileSync("src/index.ts"))'
+  ].join("\n"))
+  await assertBuilt(directory, manifest)
+  for (const file of ["esm/index.js", "esm/index.d.ts", "cjs/index.js"]) {
+    assert.equal(readFileSync(join(directory, "dist", file), "utf8"), readFileSync(join(directory, "src/index.ts"), "utf8"))
+  }
+}))
+
+test("pack boundary refuses stale artifacts without a build script", () => staleBuildFixture(async (directory, manifest) => {
+  delete manifest.scripts.build
+  await assert.rejects(assertBuilt(directory, manifest), /release package has no build script/)
+}))
