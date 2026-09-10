@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react"
 import { useController } from "../ControllerContext"
-import { initialGuide } from "../state/AppState"
+import { conversationTabIdOf, initialGuide, inConversation } from "../state/AppState"
 import "./guide.css"
 
 /*
@@ -74,6 +74,14 @@ export function GuideShell({ children }: { children: ReactNode }) {
   const controller = useController()
   const { data: sessions } = useLiveQuery(controller.store.collections.sessions)
   const { data: toasts } = useLiveQuery(controller.store.collections.toasts)
+  const { data: messages } = useLiveQuery(controller.store.collections.messages)
+  const { data: cards } = useLiveQuery(controller.store.collections.cards)
+  const { data: tabs } = useLiveQuery(controller.store.collections.tabs)
+  const conversationTabId = conversationTabIdOf(sessions[0] ?? controller.store.session(), (id) => tabs.find((tab) => tab.id === id))
+  // The outro belongs to an empty conversation. Real output owns this space
+  // as soon as it exists, including after reload or a tutorial replay.
+  const hasConversation = messages.some((row) => inConversation(row, conversationTabId)) ||
+    cards.some((row) => inConversation(row, conversationTabId))
   const guide = sessions[0]?.guide ?? initialGuide()
   const stage = guide.step
   const lastScrolledStep = useRef(-1)
@@ -524,7 +532,7 @@ export function GuideShell({ children }: { children: ReactNode }) {
              * never re-animate or trade places with a retiring copy.
              */
           }
-          {stage === 14 && (
+          {stage === 14 && !hasConversation && (
             <div className="guide-start-actions">
               {guide.acceptedPracticeTitle && <p className="guide-review-accepted"><Check size={14} /> Practice accepted: “{guide.acceptedPracticeTitle}”</p>}
               <button className="guide-primary" data-flow="connect" onClick={() => runCommandLive("connect")}>

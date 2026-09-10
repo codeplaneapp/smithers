@@ -7,7 +7,7 @@ import { ControllerTestProvider } from "../ControllerContext"
 import type { NativeRepositories } from "../native/NativeBridge"
 import type { AgentPort } from "../runtime/AgentPort"
 import { createAppController } from "../state/AppController"
-import { initialGuide } from "../state/AppState"
+import { initialGuide, type Card } from "../state/AppState"
 import { createAppStore } from "../state/AppStore"
 import { GuideShell } from "./GuideShell"
 
@@ -26,10 +26,10 @@ afterAll(async () => {
   await GlobalRegistrator.unregister()
 })
 
-const mounted: Array<() => void> = []
+const mounted: Array<() => Promise<void>> = []
 
-afterEach(() => {
-  while (mounted.length > 0) mounted.pop()?.()
+afterEach(async () => {
+  while (mounted.length > 0) await mounted.pop()?.()
 })
 
 const memoryStorage = (): StorageApi => {
@@ -59,10 +59,10 @@ const unavailableRepositories: NativeRepositories = {
 
 const text = (node: Element | null): string => (node?.textContent ?? "").replace(/\s+/g, " ").trim()
 
-const mountGuide = async (step: number): Promise<HTMLElement> => {
-  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+const mountGuide = async (step?: number, storage = memoryStorage()) => {
+  const store = await createAppStore({ kind: "localStorage", storage })
   const controller = createAppController(store, unavailableRepositories, silentAgent)
-  await store.dispatch({ type: "guide.changed", actor: "user", guide: { ...initialGuide(), step } }).isPersisted.promise
+  if (step !== undefined) await store.dispatch({ type: "guide.changed", actor: "user", guide: { ...initialGuide(), step } }).isPersisted.promise
   const host = document.createElement("div")
   document.body.append(host)
   const root = createRoot(host)
@@ -75,16 +75,22 @@ const mountGuide = async (step: number): Promise<HTMLElement> => {
       </ControllerTestProvider>
     )
   )
-  mounted.push(() => {
+  let closed = false
+  const close = async () => {
+    if (closed) return
+    closed = true
     flushSync(() => root.unmount())
     host.remove()
-  })
-  return host
+    await controller.dispose()
+    await store.dispose?.()
+  }
+  mounted.push(close)
+  return { host, store, controller, close }
 }
 
 describe("the talk-directly lesson", () => {
   test("invites the user to talk, then shows the gesture as numbered steps", async () => {
-    const host = await mountGuide(6)
+    const { host } = await mountGuide(6)
     const lesson = host.querySelector('[data-message-step="6"]')
     expect(text(lesson)).toContain("You can talk directly to me. Try it now.")
     expect(text(lesson)).not.toContain("stay out of the way")
@@ -102,7 +108,61 @@ describe("the talk-directly lesson", () => {
   }, 20000)
 
   test("other lessons show no numbered steps", async () => {
-    const host = await mountGuide(5)
+    const { host } = await mountGuide(5)
     expect(host.querySelector(".guide-steps")).toBeNull()
+  }, 20000)
+})
+
+
+const settle = async () => {
+  for (let tick = 0; tick < 3; tick++) await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+const runCard = (tabId?: string): Extract<Card, { kind: "run-trace" }> => ({
+  id: "flow-run-real", kind: "run-trace", title: "Coding", status: "active", createdAt: 0, ordinal: 0,
+  ...(tabId === undefined ? {} : { tabId }),
+  payload: { repo: "smithersai/smithers", runId: "real", workflow: "coding", phase: "running", steps: [], result: null, lastSeq: 0 }
+})
+
+describe("the workspace handoff", () => {
+  test("start actions belong to an empty conversation, and a real run retires them across reload and replay", async () => {
+    const storage = memoryStorage()
+    const first = await mountGuide(14, storage)
+    expect(text(first.host.querySelector(".guide-start-actions"))).toContain("Choose a repository")
+    await first.store.dispatch({ type: "card.upsert", actor: "system", card: runCard() }).isPersisted.promise
+    await settle()
+    expect(first.host.querySelector(".guide-start-actions")).toBeNull()
+    expect(first.host.querySelector(".guide-shell")?.getAttribute("data-step")).toBe("14")
+    await first.close()
+
+    const reopened = await mountGuide(undefined, storage)
+    expect(reopened.host.querySelector(".guide-start-actions")).toBeNull()
+    await reopened.controller.commands.run("onboarding.act", "restart")
+    await reopened.controller.commands.run("onboarding.act", "finish")
+    await settle()
+    expect(reopened.host.querySelector(".guide-shell")?.getAttribute("data-step")).toBe("14")
+    expect(reopened.host.querySelector(".guide-start-actions")).toBeNull()
+  }, 20000)
+
+  test("a message also hands the workspace to the conversation without opening the composer", async () => {
+    const { host, store } = await mountGuide(14)
+    expect(host.querySelector(".guide-start-actions")).not.toBeNull()
+    await store.dispatch({ type: "message.appended", actor: "system", text: "Choose the missing flow input." }).isPersisted.promise
+    await settle()
+    expect(host.querySelector(".guide-start-actions")).toBeNull()
+    expect(host.querySelector(".guide-shell")?.getAttribute("data-conversation-open")).toBe("false")
+  }, 20000)
+
+  test("historical rows belonging to another conversation do not dismiss the empty current conversation", async () => {
+    const { host, store } = await mountGuide(14)
+    await store.dispatch({ type: "card.upsert", actor: "system", card: runCard("historical-tab") }).isPersisted.promise
+    await store.dispatch({ type: "tab.opened", actor: "user", tab: {
+      id: "nested-card", kind: "card", title: "Historical run", cardId: "flow-run-real"
+    } }).isPersisted.promise
+    await settle()
+    // Opening a card tab preserves the one main conversation; an old tab
+    // stamp does not become new transcript content just because it is active.
+    expect(store.session().activeTabId).toBe("nested-card")
+    expect(host.querySelector(".guide-start-actions")).not.toBeNull()
   }, 20000)
 })

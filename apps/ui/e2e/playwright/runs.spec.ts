@@ -277,6 +277,7 @@ test("T1: a prompt-only run reveals its recorded plan and blocked execution thro
   const card = page.getByTestId(`card-flow-run-${RUN_ID}`)
   await expect(card.getByRole("list", { name: "Predicted Changes", exact: true })).toContainText("Store repository memory")
   await expect(card).toContainText("Blocked after 1 round.")
+  await expect(page.locator(".guide-start-actions")).toHaveCount(0)
   await expect(card).not.toContainText("Validated after")
   const first = card.getByRole("button", { name: /Store repository memory/ })
   await tabTo(page, first)
@@ -287,7 +288,7 @@ test("T1: a prompt-only run reveals its recorded plan and blocked execution thro
   expect(await inspect.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none")
   await page.keyboard.press("Enter")
   await expect(card.locator("[data-span='engine:failed-round:0']")).toContainText("The required fast check failed.")
-  await page.screenshot({ path: "/tmp/smithers-coding-evidence-ui.png", fullPage: true })
+  await page.screenshot({ path: "/tmp/smithers-coding-overlay-after.png", fullPage: true })
 })
 
 test("T1: coding plan launch, inspection and restoration work with only the keyboard in the Command-K shell", async ({ page }) => {
@@ -322,6 +323,7 @@ test("T1: coding plan launch, inspection and restoration work with only the keyb
   await expect(page.getByRole("dialog", { name: "Talk to Smithers" })).toBeHidden()
   await page.reload()
   await expect(page.locator(".guide-shell")).toBeVisible()
+  await expect(page.locator(".guide-start-actions")).toHaveCount(0)
   await expect(page.getByTestId("composer-input")).toBeHidden()
   await page.keyboard.press("Control+k")
   await expect(first).toHaveAttribute("aria-expanded", "true")
