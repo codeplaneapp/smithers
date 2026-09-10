@@ -6,6 +6,7 @@ import * as Target from "@smthrs/targets/Target"
 import { Minimatch } from "minimatch"
 import * as Path from "node:path"
 import * as ContainedProcess from "./internal/ContainedProcess.ts"
+import { inputPackage } from "./internal/InputPackage.ts"
 import type { PackageIndex } from "./PackageIndex.ts"
 import { productionSourceRoots } from "./Planner.ts"
 
@@ -159,7 +160,7 @@ export const select = (index: PackageIndex, pattern: string, paths: ReadonlyArra
     const metadata = Target.metadata(target)
     const packagePath = index.ownerOf(target) ?? ""
     const packagePrefix = packagePath === "" ? undefined : `${packagePath}/`
-    const inputs = metadata.inputs.map((input) => compileInput(input, packagePath, glob))
+    const inputs = metadata.inputs.map((input) => compileInput(input, inputPackage(metadata, packagePath), glob))
     const matches = new Map<string, boolean>()
     value = {
       metadata,
@@ -203,7 +204,8 @@ export const select = (index: PackageIndex, pattern: string, paths: ReadonlyArra
       const value = entry(target)
       const metadata = value.metadata
       const views = metadata.kinds.map((kind) => metadata.forKind(kind))
-      const inputs = views.flatMap((view) => view.inputs).map((input) => compileInput(input, value.packagePath, glob))
+      const inputs = views.flatMap((view) => view.inputs)
+        .map((input) => compileInput(input, inputPackage(metadata, value.packagePath), glob))
       direct.set(target, (path) =>
         value.matchesBase(path) || inputs.some((input) => input(path)) ||
         metadata.inputs.length === 0 && metadata.dependencies.length === 0)

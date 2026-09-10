@@ -17,6 +17,7 @@ import * as Input from "@smthrs/targets/Input"
 import * as Target from "@smthrs/targets/Target"
 import type * as TargetIndexRule from "@smthrs/targets/TargetIndex"
 import * as Ansi from "./Ansi.ts"
+import { inputPackage } from "./internal/InputPackage.ts"
 import * as Path from "./internal/Path.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
 import type * as PackageIndex from "./PackageIndex.ts"
@@ -154,7 +155,7 @@ export const build = async (
       ...(metadata.featured ? { featured: true as const } : {}),
       ...(typeof mode === "string" ? { mode } : {}),
       cacheable: metadata.cacheable,
-      inputs: metadata.inputs.map((declared) => inputOf(row.packagePath, declared)),
+      inputs: metadata.inputs.map((declared) => inputOf(inputPackage(metadata, row.packagePath), declared)),
       outputs: outputsOf(row.packagePath, metadata),
       dependencies: [...(dependencies.get(row.label) ?? [])].sort(byCodeUnit),
       ...(source === undefined ? {} : { source }),

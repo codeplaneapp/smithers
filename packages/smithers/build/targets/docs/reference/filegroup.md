@@ -37,6 +37,14 @@ For glob expansion and `Input.discoverFiles`, matching rules in deeper `.gitigno
 
 `kinds` is empty, so `smithers-build build`, `test`, `lint`, and `docs` never select a group as a root. Dependency traversal, `smithers-build query`, and `smithers-build graph` ignore kinds, so a group is still addressable by label and still traversed by `deps(...)`. Under a Flow runtime, a group reached as a dependency records one `ExpandFilegroup` call that reads the named files and succeeds with them digested, which needs `ExpandFilegroupLive`. Under `smithers-build`, the group node settles green without spawning a process, and its files reach the consumer through the read set and the consumer's key.
 
+The CLI planner, affected-file selection and target index use an explicit non-dot
+`cwd` as the workspace-relative input anchor. For example, a group declared in
+`flows/PACKAGE.ts` with `cwd: "packages/library"` and `srcs: [Smithers.glob("src/**")]`
+tracks that library's sources without running its build. The group's label and
+package ownership still belong to `flows`. The default `cwd: "."` resolves inputs
+from the declaring package; `cwd: "//"` explicitly anchors them at the workspace
+root. Globs retain ignore rules, symlink containment and nested package boundaries.
+
 ## Channels
 
 The declaration passes these channel schemas:

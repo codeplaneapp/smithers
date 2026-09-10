@@ -53,6 +53,7 @@ import * as TargetIndex from "../TargetIndex.ts"
 import * as Workspace from "../Workspace.ts"
 import * as WorkspaceToolchain from "../WorkspaceToolchain.ts"
 import { collectTargets } from "./Attrs.ts"
+import { inputPackage } from "./InputPackage.ts"
 import * as CoreRuleSelection from "./CoreRuleSelection.ts"
 import type { CrateRow, Mode, PackageNode, PackagePlan, RunOptions, TestOperandPlan } from "./PackageOptions.ts"
 import * as Path from "./Path.ts"
@@ -1335,7 +1336,7 @@ const visit = async (
     dependencyRows.push({ label: planned.label, key: depKey })
   }
 
-  const declaredInputs = await expandInputs(context, packagePath, view.inputs)
+  const declaredInputs = await expandInputs(context, inputPackage(metadata, packagePath), view.inputs)
   const inputDigests = new Map<Input.Declared, string>()
   for (const expanded of declaredInputs) inputDigests.set(expanded.declaration, expanded.digest)
 
