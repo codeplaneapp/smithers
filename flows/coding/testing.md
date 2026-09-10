@@ -1,0 +1,67 @@
+# Coding backpressure targets
+
+`flows/PACKAGE.ts` declares the current coding tests using the existing test
+targets. These labels describe test scope, not a claim that a suite is near
+instant. Use measured build/typecheck gates for fast backpressure; run suites
+that take longer asynchronously.
+
+| Label | Scope | Runtime / budget |
+| --- | --- | --- |
+| `//flows:codingPolicy` | Host configuration/seat contracts, test-inventory coverage, missing-native-tool refusal | Node, existing 10 minute test budget |
+| `//flows:coding` | Linear coding policy with real JJ and SQLite, scripted implementations/checks | Node, 10 minutes |
+| `//flows:codingRuntime` | Real QuickJS authority refusal and explicit operator configuration/startup | Node, 10 minutes |
+| `//flows:codingConfigBun` | Operator configuration/startup using injected Bun services | Bun, 10 minutes |
+| `//flows:codingNative` | Existing native ports, atoms, checks, planning/wiki, correction, POC and configured host fixtures | Node, 45 minutes |
+| `//flows:codingNativeBun` | The fixtures that select the Bun platform/runtime, including the complete request host | Bun, 45 minutes |
+| `//flows:codingBundle` | Existing deployment bundler acceptance for manual plans and prompt requests | Node, 45 minutes |
+| `//flows:codingBundleBun` | The same two bundled host acceptance cases | Bun, 45 minutes |
+
+The native and bundle labels are slow gates. Their private launcher runs one
+existing test file at a time, with a 25 minute child limit in addition to each
+fixture's own timeout. The enclosing existing `Shell.Test` also bounds the entire
+gate. They are uncached, so an installed external tool is never mistaken for a
+repository build output with a stable content key. Gate output records measured
+preflight adapter/exporter SHA256 values and JJ version.
+
+Native gates require a POSIX host with JJ, Python 3, and the actual Plue
+adapter/exporter. Current fixtures were validated with JJ 0.39.0; individual
+fixtures retain their owning native compatibility assertions. The launcher
+records the version without imposing another version policy. It uses the installed paths
+`/usr/local/lib/smithers/workspace-coding.py` and
+`/usr/local/bin/smithers-jj-export`. Missing/unreadable tools refuse the gate
+before an opt-in test can report a skip. The build executor deliberately does
+not inherit arbitrary environment variables; configure tool locations in its
+existing declared execution environment if the deployment uses different paths.
+
+For a direct local acceptance run, existing fixture variables may point at
+explicit artifacts instead:
+
+```sh
+PLUE_CODING_ADAPTER_SOURCE=/path/to/workspace-coding.py \
+PLUE_JJ_EXPORT_BINARY=/path/to/smithers-jj-export \
+node flows/test/coding-native-gate.mjs source
+```
+
+Use `bun` for the Bun source matrix, or replace `source` with `bundle` for the
+deployable artifact matrix. Atom and correction standalone fixtures currently
+hardwire NodeRuntime and run in the Node matrix. The Bun request-host fixture
+exercises the production atom/correction composition through Bun injection; the
+launcher does not relabel those standalone Node fixtures as Bun evidence.
+
+For bounded launcher acceptance, append an existing source fixture name, for
+example `node flows/test/coding-native-gate.mjs source coding-native.test.ts`.
+The declared graph gates omit this selector and run the complete relevant list.
+An unlisted name or a Node-only fixture selected under Bun refuses before tools
+start. A selected run is evidence only for that fixture, never a full gate pass.
+
+The graph declares recipe source, workflow Markdown, test launchers and dependency
+configuration as inputs. Existing source-only `Filegroup` dependencies use each
+Smithers package's own `cwd` and cover its `src/**`, package manifest and TypeScript
+configuration, including control and gateway packages. They preserve package
+boundaries and do not trigger package builds. The private directory inventory is
+checked against the existing pnpm workspace membership reader; the existing
+`pnpmWorkspace` input tracks member manifests and export maps.
+
+The coverage regression refuses a newly added `coding*.test.ts` file that is absent
+from both ordinary and native gates. The recipe adds labels and a private launcher,
+with no new target type, execution service, database or public library API.
