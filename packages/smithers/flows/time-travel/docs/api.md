@@ -24,11 +24,14 @@ const program = Effect.gen(function*() {
 | `@smthrs/time-travel/SqlTimeTravelStore` | [src/SqlTimeTravelStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/time-travel/src/SqlTimeTravelStore.ts) | SQLite dialect only. Any SQLite-speaking `SqlClient` runs it.                        |
 
 The barrel exports `TimeTravel` and `ReadOnlyTimeTravel` flat, and
-the other modules as namespaces. Every module under `src/` is also published at
+the other modules as namespaces. It re-exports the rest of the `TimeTravel`
+module with them: the types `Position`, `Projection`, `Service`, `Options`,
+`ReplayOptions`, `ForkOptions`, `RewindOptions`, `ForkResult` and
+`RewindResult`, and the constants `defaultMaxHistoryEntries` and
+`forkWorkspaceName`. Every module under `src/` is also published at
 `@smthrs/time-travel/<Module>` by the package `exports` map, which is where the
-members of the `TimeTravel` module other than the service class itself live:
-`Position`, `Projection`, `Service`, `Options`, `defaultMaxHistoryEntries`,
-`make`, and `makeWith` are reached through
+remaining members of the `TimeTravel` module live: `make` and `makeWith` are
+reached through
 `import * as TimeTravel from "@smthrs/time-travel/TimeTravel"`.
 
 `@smthrs/time-travel/internal/*` is mapped to `null`: `Replay`, `Fork`,
@@ -56,6 +59,7 @@ renaming it invalidates recorded runs.
 | `make`                     | `Effect<Service, TimeTravelError, Requirements \| Scope>`                                                                |
 | `makeWith`                 | `(options?: Options) => Effect<Service, TimeTravelError, Requirements \| Scope>`                                         |
 | `defaultMaxHistoryEntries` | `number`. 100,000.                                                                                                       |
+| `forkWorkspaceName`        | `(childRunId: string) => string`. The jj workspace name a fork derives from the child run id it mints.                   |
 
 `Requirements` is `TimeTravelStore | Journal | RunStore | CacheStore | Jj`.
 Building the layer is scoped: the scope owns every fork workspace the service
@@ -119,6 +123,7 @@ How the service is composed.
 interface ReplayOptions {
   readonly pageSize?: number | undefined
   readonly maxHistoryEntries?: number | undefined
+  readonly engineEvents?: EngineEvent.Consumer | undefined
 }
 
 interface ForkOptions {
@@ -139,7 +144,16 @@ defaults to 100. In `ReplayOptions` and `RewindOptions`, it must be a safe integ
 from 1 through `Journal.maxEntriesLimit` (10,000). Larger pages are refused
 with `invalid` before reading the journal. `maxHistoryEntries` overrides
 `Options.maxHistoryEntries` for one call. `workspaceRoot` defaults to `.flows/forks` and only moves which lane
-the derived workspace name lands in. `detachedChildren` defaults to `"block"`.
+the derived workspace name lands in. `retainWorkspace` keeps the child lane
+registered after the service scope closes. `detachedChildren` defaults to
+`"block"`.
+
+`engineEvents` is the `EngineEvent.Consumer` from `@smthrs/journal` that a
+versioned engine record is decoded against: its `runId` and `lineageId` must
+equal the position's, and its source allowlist decides which emitters the fold
+accepts. A fold that reaches a `flows.engine.v*` entry without a matching
+consumer fails `invalid` and derives nothing. `inspect` takes no options, so a
+run whose journal carries those records is readable only through `replay`.
 
 ### ForkResult and RewindResult
 
@@ -169,7 +183,7 @@ a `Position`: a run id plus a `Frame`.
 | Operation                                | What it does                                                                                                                                                                                                                                                                                                                                                    |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `replay(position, projection, options?)` | Folds the committed journal prefix up to the frame through a pure projection. It has no dispatcher, so a replay can never re-execute a model call or a child flow, and that is what separates it from an engine resume. The fold streams and stops reading at the frame.                                                                                        |
-| `inspect(position, projection)`          | The same fold as `replay`, under the service defaults. It exists for the caller that never tunes a read.                                                                                                                                                                                                                                                        |
+| `inspect(position, projection)`          | The same fold as `replay`, under the service defaults. It exists for the caller that never tunes a read, and takes no options, so versioned engine history needs `replay` and its `engineEvents`.                                                                                                                                                               |
 | `fork(position, options?)`               | Mints and reserves a child run id, provisions the child's Jujutsu workspace pinned at the frame's recorded pointer, then copies the journal prefix, the frame's anchors, and only the attempts that prefix can explain, and records the lineage edge. The parent is never mutated, and the fork refuses `live_parent` while the parent or any ancestor is live. |
 | `rewind(position, options?)`             | The fenced, audited suffix-removal protocol. The ownership claim and the audit id are minted inside.                                                                                                                                                                                                                                                            |
 
@@ -333,22 +347,22 @@ from either.
 
 ### Service
 
-| Method                                                            | What it does                                                                                                                                                                                                                                          |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `snapshotAt(runId, frame)`                                        | The anchor recorded at a frame, or `undefined`.                                                                                                                                                                                                       |
-| `recordSnapshot(snapshot)`                                        | Records one anchor. Written by the snapshot projector, never by a caller.                                                                                                                                                                             |
-| `stateAt(runId, frame)`                                           | The run state **at** a frame as encoded JSON, derived by replaying the run-decision records, not read off the run row's latest state.                                                                                                                 |
-| `attemptsAt(runId, frame)`                                        | The attempts that had been admitted at a frame, derived the same way.                                                                                                                                                                                 |
-| `descendants(runId, frame)`                                       | The lineage edges hanging off this run at or after a frame, split into attached and detached.                                                                                                                                                         |
-| `writeAudit(audit)`                                               | Opens the audit trail for a rewind, before anything is compensated or truncated.                                                                                                                                                                      |
-| `updateAudit(id, patch)`                                          | Advances an open audit row. Any key outside `AuditPatch` is refused `invalid`.                                                                                                                                                                        |
-| `pendingAudits()`                                                 | Every audit row still `in_progress`. Recovery drains this on layer build.                                                                                                                                                                             |
+| Method                                                            | What it does                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `snapshotAt(runId, frame)`                                        | The anchor recorded at a frame, or `undefined`.                                                                                                                                                                                                                                                |
+| `recordSnapshot(snapshot)`                                        | Records one anchor. Written by the snapshot projector, never by a caller.                                                                                                                                                                                                                      |
+| `stateAt(runId, frame)`                                           | The run state **at** a frame as encoded JSON, derived by replaying the run-decision records, not read off the run row's latest state.                                                                                                                                                          |
+| `attemptsAt(runId, frame)`                                        | The attempts that had been admitted at a frame, derived the same way.                                                                                                                                                                                                                          |
+| `descendants(runId, frame)`                                       | The lineage edges hanging off this run at or after a frame, split into attached and detached.                                                                                                                                                                                                  |
+| `writeAudit(audit)`                                               | Opens the audit trail for a rewind, before anything is compensated or truncated.                                                                                                                                                                                                               |
+| `updateAudit(id, patch)`                                          | Advances an open audit row. Any key outside `AuditPatch` is refused `invalid`.                                                                                                                                                                                                                 |
+| `pendingAudits()`                                                 | Every audit row still `in_progress`. Recovery drains this on layer build.                                                                                                                                                                                                                      |
 | `archiveAndTruncate(runId, frame, receipts, owner, childOwners?)` | Refuses malformed frames with `invalid`. Truncates a run back to a frame, archiving rather than deleting, removing deferred completions and clock deadlines named by archived records, and persisting the receipts. Fenced on the caller's ownership and on every non-terminal attached child. |
-| `archivedAt(runId, seq)`                                          | Whether the archive holds a record at that coordinate. Recovery's commit-point evidence.                                                                                                                                                              |
-| `nextForkId(parentRunId, frame)`                                  | Mints and durably reserves the run id the next fork off that frame will carry, without creating a run.                                                                                                                                                |
-| `abandonForkIntents(staleBeforeMs)`                               | Every reservation older than `staleBeforeMs` whose fork never committed, handed back exactly once.                                                                                                                                                    |
-| `createFork(parentRunId, frame, childRunId?)`                     | Branches a new run off a frame, copying the journal prefix and the attempts that existed there, and recording the `fork` edge. The parent is untouched.                                                                                               |
-| `recordReceipt(receipt)`                                          | Persists one compensation receipt against its audit row, before the journal range that effect belongs to is truncated.                                                                                                                                |
+| `archivedAt(runId, seq)`                                          | Whether the archive holds a record at that coordinate. Recovery's commit-point evidence.                                                                                                                                                                                                       |
+| `nextForkId(parentRunId, frame)`                                  | Mints and durably reserves the run id the next fork off that frame will carry, without creating a run.                                                                                                                                                                                         |
+| `abandonForkIntents(staleBeforeMs)`                               | Every reservation older than `staleBeforeMs` whose fork never committed, handed back exactly once.                                                                                                                                                                                             |
+| `createFork(parentRunId, frame, childRunId?)`                     | Branches a new run off a frame, copying the journal prefix and the attempts that existed there, and recording the `fork` edge. The parent is untouched.                                                                                                                                        |
+| `recordReceipt(receipt)`                                          | Persists one compensation receipt against its audit row, before the journal range that effect belongs to is truncated.                                                                                                                                                                         |
 
 Every method fails as `TimeTravelError`.
 

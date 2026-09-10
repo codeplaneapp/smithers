@@ -44,13 +44,7 @@ const program = Effect.gen(function*() {
 
 A frame is `{ lineageId, seq }`: a sequence number on one lineage of the journal. Forks create descendant lineages, so the lineage id is part of the address, and `seq: 17` names the committed prefix through entry 17 of it.
 
-
-**Fork replay limitation:** copied attempt rows retain their parent digests.
-Actions whose keys include the run ID execute again in the child, including
-compensable and irreversible actions. An explicitly shared cache environment
-can reuse eligible sealed results, but copied attempts alone do not make the
-prefix replayable. Make repeated external effects idempotent before driving a
-fork.
+**Fork replay limitation:** copied attempt rows retain their parent digests, so actions keyed by the run ID execute again in the child. [Keep sealed steps from re-executing](https://time-travel.smithers.sh/guides/fork-a-run/#keep-sealed-steps-from-re-executing) carries the full rule and the cache declaration that answers it.
 
 ## Replay reads and never executes
 

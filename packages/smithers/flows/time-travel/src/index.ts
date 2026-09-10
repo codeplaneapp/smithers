@@ -51,6 +51,34 @@
 export { ReadOnlyTimeTravel, TimeTravel } from "./TimeTravel.ts"
 
 /**
+ * The `TimeTravel` module's types, re-exported so a caller annotates a
+ * signature without reaching for the `@smthrs/time-travel/TimeTravel` subpath.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type {
+  ForkOptions,
+  ForkResult,
+  Options,
+  Position,
+  Projection,
+  ReplayOptions,
+  RewindOptions,
+  RewindResult,
+  Service
+} from "./TimeTravel.ts"
+
+/**
+ * The derived fork workspace name and the default history cap, beside the
+ * service key that reads them.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export { defaultMaxHistoryEntries, forkWorkspaceName } from "./TimeTravel.ts"
+
+/**
  * @category models
  * @since 0.1.0
  */

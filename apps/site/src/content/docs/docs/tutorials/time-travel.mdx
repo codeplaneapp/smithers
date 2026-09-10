@@ -12,13 +12,7 @@ In this tutorial you'll build a small release flow, finish a run, fork it at a j
 
 Fork copies a run's history up to one frame so the copy can diverge from its parent, rewind trims the run's own history back to a frame, and compensation is the per-effect undo a rewind performs on what the trimmed suffix did. [Time travel](/docs/concepts/time-travel/) explains all three. This tutorial uses the library API to show the operation directly. For existing CLI runs, use `smthrs runs inspect/replay/fork/rewind` as described in [time travel](/docs/concepts/time-travel/). The full operation and error tables live in the [time-travel API reference](/docs/reference/api/time-travel/).
 
-
-**Fork replay limitation:** copied attempt rows retain their parent digests.
-Actions whose keys include the run ID execute again in the child, including
-compensable and irreversible actions. An explicitly shared cache environment
-can reuse eligible sealed results, but copied attempts alone do not make the
-prefix replayable. Make repeated external effects idempotent before driving a
-fork.
+**Fork replay limitation:** copied attempt rows retain their parent digests, so actions keyed by the run ID execute again in the child. [Keep sealed steps from re-executing](https://time-travel.smithers.sh/guides/fork-a-run/#keep-sealed-steps-from-re-executing) carries the full rule and the cache declaration that answers it.
 
 ## Before you begin
 

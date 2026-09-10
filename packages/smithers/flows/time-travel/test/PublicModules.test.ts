@@ -79,8 +79,27 @@ describe("public time-travel modules", () => {
       "SqlTimeTravelStore",
       "TimeTravel",
       "TimeTravelError",
-      "TimeTravelStore"
+      "TimeTravelStore",
+      "defaultMaxHistoryEntries",
+      "forkWorkspaceName"
     ].sort())
+  })
+
+  it("names the TimeTravel module's types and constants from the barrel", () => {
+    // A caller who annotates a signature should not need a second import path.
+    const position: TimeTravel.Position = { runId: "parent", frame }
+    const projection: TimeTravel.Projection<number> = { initial: 0, reduce: (state) => state + 1 }
+    const replayOptions: TimeTravel.ReplayOptions = { pageSize: 1 }
+    const forkOptions: TimeTravel.ForkOptions = { retainWorkspace: true }
+    const rewindOptions: TimeTravel.RewindOptions = { detachedChildren: "cancel" }
+    const options: TimeTravel.Options = { maxHistoryEntries: 1 }
+    const results: [TimeTravel.ForkResult, TimeTravel.RewindResult] | undefined = undefined
+    const service: TimeTravel.Service | undefined = undefined
+
+    expect([position, projection, replayOptions, forkOptions, rewindOptions, options]).toHaveLength(6)
+    expect([results, service]).toEqual([undefined, undefined])
+    expect(TimeTravel.forkWorkspaceName("child-1")).toBe(Fork.workspaceNameFor("child-1"))
+    expect(TimeTravel.defaultMaxHistoryEntries).toBe(100_000)
   })
 
   it("exposes the service key as a yieldable tag carrying its own layer", () => {
