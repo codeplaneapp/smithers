@@ -117,6 +117,7 @@ describe("durable engine migrations", () => {
         ],
         flows_deferred_completions: [
           "completed_at_ms",
+          "consumed_at_ms",
           "deferred_name",
           "execution_id",
           "exit_json",

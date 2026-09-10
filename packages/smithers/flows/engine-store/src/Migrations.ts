@@ -28,6 +28,7 @@ import { planEnvironment } from "./migrations/0004_plan_environment.ts"
 import { planMerges } from "./migrations/0005_plan_merges.ts"
 import { executionListing } from "./migrations/0006_execution_listing.ts"
 import { runParentSequence } from "./migrations/0007_run_parent_sequence.ts"
+import { deferredConsumption } from "./migrations/0008_deferred_consumption.ts"
 
 /**
  * Engine-store's own namespaced migration set.
@@ -45,7 +46,8 @@ export const set: DatabaseMigrations.MigrationSet = {
     "0004_plan_environment": planEnvironment,
     "0005_plan_merges": planMerges,
     "0006_execution_listing": executionListing,
-    "0007_run_parent_sequence": runParentSequence
+    "0007_run_parent_sequence": runParentSequence,
+    "0008_deferred_consumption": deferredConsumption
   }
 }
 

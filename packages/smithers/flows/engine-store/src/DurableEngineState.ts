@@ -365,6 +365,8 @@ export type RecordRunParentOutcome =
 export interface Service {
   // TODO(piece-6): fold into @smthrs/journal — needs DeferredStore.get(flowName, executionId, deferredName).
   readonly deferred: (address: DeferredAddress) => Effect.Effect<Option.Option<DeferredRow>>
+  /** Marks an existing result observed without removing its replay evidence. */
+  readonly consumeDeferred: (address: DeferredAddress, consumedAtMs: number) => Effect.Effect<void>
   // TODO(piece-6): fold into @smthrs/journal — needs DeferredStore.completeFirstWriterWins(row).
   readonly completeDeferred: (row: DeferredRow) => Effect.Effect<CompleteDeferredOutcome>
   // TODO(piece-6): fold into @smthrs/journal — needs ClockStore.get(flowName, executionId, clockName).
@@ -415,7 +417,9 @@ export interface Service {
     readonly flowName?: string
   }) => Effect.Effect<ReadonlyArray<ClockRow>>
   /**
-   * Lists completed deferred addresses for registration-time wake recovery.
+   * Lists unconsumed completed deferred addresses for registration-time wake recovery.
+   * Observed results remain readable through `deferred` but cannot re-drive a
+   * run that has moved on to a later wait.
    *
    * Rows belonging to a settled run are never listed, for the reason
    * {@link Service.pendingClocks} gives: this is swept on every registration,
@@ -869,6 +873,20 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     )
   )
 
+  const consumeDeferred: Service["consumeDeferred"] = Effect.fn("DurableEngineState.consumeDeferred")((
+    address,
+    consumedAtMs
+  ) =>
+    writer.write(sql`
+      UPDATE flows_deferred_completions
+      SET consumed_at_ms = ${consumedAtMs}
+      WHERE flow_name = ${address.flowName}
+        AND execution_id = ${address.executionId}
+        AND deferred_name = ${address.deferredName}
+        AND consumed_at_ms IS NULL
+    `).pipe(Effect.orDie, Effect.asVoid)
+  )
+
   const completeDeferred: Service["completeDeferred"] = Effect.fn(
     "DurableEngineState.completeDeferred"
   )((row) =>
@@ -1125,6 +1143,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         deferred_name AS "deferredName"
       FROM flows_deferred_completions
       WHERE flow_name = ${flowName}
+        AND consumed_at_ms IS NULL
         AND EXISTS (
           SELECT 1 FROM flows_runs
           WHERE flows_runs.run_id = flows_deferred_completions.execution_id
@@ -1495,6 +1514,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
 
   return DurableEngineState.of({
     deferred,
+    consumeDeferred,
     completeDeferred,
     clock,
     scheduleClock,
@@ -1592,6 +1612,7 @@ export interface MemoryOptions {
  */
 export const makeMemory = (options: MemoryOptions = {}): Service => {
   const deferreds = new Map<string, DeferredRow>()
+  const consumedDeferreds = new Map<string, number>()
   const clocks = new Map<string, ClockRow>()
   const waitingRows = new Map<string, WaitingRow>()
   // childId -> (parentId -> seq); `parentSeq` mirrors the SQL MAX(seq)+1.
@@ -1699,6 +1720,14 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
         return row === undefined ? Option.none() : Option.some(yield* snapshotDeferred(row))
       })
     ),
+    consumeDeferred: Effect.fn("DurableEngineState.consumeDeferred")((address, consumedAtMs) =>
+      Effect.sync(() => {
+        const key = deferredKey(address)
+        if (deferreds.has(key) && !consumedDeferreds.has(key)) {
+          consumedDeferreds.set(key, consumedAtMs)
+        }
+      })
+    ),
     completeDeferred: Effect.fn("DurableEngineState.completeDeferred")((row) =>
       Effect.gen(function*() {
         const stored = yield* snapshotDeferred(row)
@@ -1793,7 +1822,9 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
     completedDeferreds: Effect.fn("DurableEngineState.completedDeferreds")((flowName) =>
       Effect.sync(() =>
         Array.from(deferreds.values())
-          .filter((row) => row.flowName === flowName && isLive(row.executionId))
+          .filter((row) =>
+            row.flowName === flowName && isLive(row.executionId) && !consumedDeferreds.has(deferredKey(row))
+          )
           .map(({ flowName, executionId, deferredName }) => ({
             flowName,
             executionId,
@@ -1976,6 +2007,7 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
         Effect.suspend(() => {
           const before = {
             deferreds: new Map(deferreds),
+            consumedDeferreds: new Map(consumedDeferreds),
             clocks: new Map(clocks),
             waitingRows: new Map(waitingRows),
             parentEdges: new Map([...parentEdges].map(([child, parents]) => [child, new Map(parents)])),
@@ -1986,6 +2018,7 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
             Effect.catchCause((cause) =>
               Effect.sync(() => {
                 restoreMap(deferreds, before.deferreds)
+                restoreMap(consumedDeferreds, before.consumedDeferreds)
                 restoreMap(clocks, before.clocks)
                 restoreMap(waitingRows, before.waitingRows)
                 restoreMap(parentEdges, before.parentEdges)
@@ -2005,6 +2038,7 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
 
   return DurableEngineState.of({
     deferred: (address) => guard(unguarded.deferred(address)),
+    consumeDeferred: (address, consumedAtMs) => guard(unguarded.consumeDeferred(address, consumedAtMs)),
     completeDeferred: (row) => guard(unguarded.completeDeferred(row)),
     clock: (address) => guard(unguarded.clock(address)),
     scheduleClock: (row, owner) => guard(unguarded.scheduleClock(row, owner)),

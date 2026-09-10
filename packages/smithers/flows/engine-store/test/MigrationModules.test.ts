@@ -18,6 +18,7 @@ import * as PlanEnvironment from "../src/migrations/0004_plan_environment.ts"
 import * as PlanMerges from "../src/migrations/0005_plan_merges.ts"
 import * as ExecutionListing from "../src/migrations/0006_execution_listing.ts"
 import * as RunParentSequence from "../src/migrations/0007_run_parent_sequence.ts"
+import * as DeferredConsumption from "../src/migrations/0008_deferred_consumption.ts"
 
 describe("migration modules", () => {
   it("registers an Effect for every migration in the set", () => {
@@ -29,7 +30,8 @@ describe("migration modules", () => {
       "0004_plan_environment",
       "0005_plan_merges",
       "0006_execution_listing",
-      "0007_run_parent_sequence"
+      "0007_run_parent_sequence",
+      "0008_deferred_consumption"
     ])
     for (const [id, migration] of entries) {
       expect(Effect.isEffect(migration), id).toBe(true)
@@ -42,6 +44,7 @@ describe("migration modules", () => {
     expect(Migrations.set.migrations["0005_plan_merges"]).toBe(PlanMerges.planMerges)
     expect(Migrations.set.migrations["0006_execution_listing"]).toBe(ExecutionListing.executionListing)
     expect(Migrations.set.migrations["0007_run_parent_sequence"]).toBe(RunParentSequence.runParentSequence)
+    expect(Migrations.set.migrations["0008_deferred_consumption"]).toBe(DeferredConsumption.deferredConsumption)
   })
 
   it("exports each migration as a named binding and no default", () => {
@@ -56,5 +59,6 @@ describe("migration modules", () => {
     expect(Object.keys(PlanMerges)).toEqual(["planMerges"])
     expect(Object.keys(ExecutionListing)).toEqual(["executionListing"])
     expect(Object.keys(RunParentSequence)).toEqual(["runParentSequence"])
+    expect(Object.keys(DeferredConsumption)).toEqual(["deferredConsumption"])
   })
 })

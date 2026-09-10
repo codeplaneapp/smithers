@@ -166,6 +166,7 @@ only after the mutation returns.
 | Member                   | Signature                                                                                    |
 | ------------------------ | -------------------------------------------------------------------------------------------- |
 | `deferred`               | `(address: DeferredAddress) => Effect<Option<DeferredRow>>`                                  |
+| `consumeDeferred`        | `(address: DeferredAddress, consumedAtMs: number) => Effect<void>`                           |
 | `completeDeferred`       | `(row: DeferredRow) => Effect<CompleteDeferredOutcome>`                                      |
 | `clock`                  | `(address: ClockAddress) => Effect<Option<ClockRow>>`                                        |
 | `scheduleClock`          | `(row: ClockRow, owner: OwnerId) => Effect<ScheduleClockOutcome>`                           |
@@ -198,7 +199,14 @@ Migration 0007 indexes `seq` so allocation does not scan retained parent history
 statement, which a terminal transition does in its own transaction.
 `pendingClocks` and `completedDeferreds` never list a row whose run has settled,
 so a registration sweep re-arms timers and replays completions for runs that can
-still make progress and for no others. `attemptSurvivors` is optional because
+still make progress and for no others. `completedDeferreds` also excludes
+completions marked observed by `consumeDeferred`. The engine marks a completion
+before `deferredResult` serves it; `deferred` remains a read-only lookup and keeps
+returning the original result for replay. Duplicate completion writes do not
+clear the marker. Migration 0008 leaves existing completions unconsumed until
+the upgraded engine first serves them.
+
+`attemptSurvivors` is optional because
 only storage that can range-scan `flows_attempts` implements it; when absent the
 engine falls back to per-attempt point reads against `AttemptStore`.
 

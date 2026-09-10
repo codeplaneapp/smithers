@@ -690,9 +690,10 @@ describe("fence", () => {
   const upgrades: ReadonlyArray<readonly [string, ReadonlyArray<number>]> = [
     ["the same migration set", []],
     ["a global suffix in the plan block", [4003]],
-    ["engine-store 3007 below the installed plan block", [3007]],
-    ["engine-store 3006 below the installed plan block", [3006, 3007]],
-    ["the previous engine and run-store migration sets", [1003, 3006, 3007]]
+    ["engine-store 3008 below the installed plan block", [3008]],
+    ["engine-store 3007 below the installed plan block", [3007, 3008]],
+    ["engine-store 3006 below the installed plan block", [3006, 3007, 3008]],
+    ["the previous engine and run-store migration sets", [1003, 3006, 3007, 3008]]
   ]
   for (const [name, omitted] of upgrades) {
     it.effect(`restores, fences, and resumes with ${name}`, () =>
@@ -792,7 +793,7 @@ describe("fence", () => {
           `
           const before = yield* sql`SELECT * FROM flows_runs WHERE run_id = 'owned-run'`
           // An additional migration cannot compensate for lost or renamed history.
-          yield* sql`INSERT INTO flows_migrations (migration_id, name) VALUES (3008, 'engine-store_future')`
+          yield* sql`INSERT INTO flows_migrations (migration_id, name) VALUES (3009, 'engine-store_future')`
           if (change === "missing") {
             yield* sql`DELETE FROM flows_migrations WHERE migration_id = 3005`
           } else {

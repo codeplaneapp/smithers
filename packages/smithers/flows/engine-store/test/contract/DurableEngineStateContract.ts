@@ -499,6 +499,37 @@ export const describeContract = (harness: Harness): void => {
         expect(result.all).toHaveLength(4)
       }))
 
+    it.effect("consumption survives restart, rolls back, and never hides replay evidence", () =>
+      harness.run((context) =>
+        Effect.gen(function*() {
+          const row: DurableEngineState.DeferredRow = {
+            flowName: "Contract/Consumption",
+            executionId: "consumption-run",
+            deferredName: "answer",
+            exit: { value: "first" },
+            completedAtMs: 10
+          }
+          yield* context.seedRun(row.executionId, owner)
+          // An absent result cannot be consumed ahead of its arrival.
+          yield* context.state.consumeDeferred(row, 11)
+          yield* context.state.completeDeferred(row)
+          const before = yield* context.state.completedDeferreds(row.flowName)
+          expect(before).toHaveLength(1)
+          yield* context.state.transaction(Effect.gen(function*() {
+            yield* context.state.consumeDeferred(row, 12)
+            expect(yield* context.state.completedDeferreds(row.flowName)).toEqual([])
+            return yield* Effect.fail("rollback")
+          })).pipe(Effect.catch(() => Effect.void))
+          expect(yield* context.state.completedDeferreds(row.flowName)).toEqual(before)
+          yield* context.state.consumeDeferred(row, 13)
+          const restarted = yield* context.restart
+          yield* restarted.consumeDeferred(row, 14)
+          yield* restarted.completeDeferred({ ...row, exit: { value: "duplicate" } })
+          expect(yield* restarted.completedDeferreds(row.flowName)).toEqual([])
+          expect(Option.getOrThrow(yield* restarted.deferred(row))).toEqual(row)
+        })
+      ))
+
     it.effect("keeps the first deferred completion and reads it back after a restart", () =>
       Effect.gen(function*() {
         const row: DurableEngineState.DeferredRow = {

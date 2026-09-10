@@ -204,6 +204,102 @@ describe("durable deferred outcomes across a restart", () => {
   })
 })
 
+describe("registration after a deferred was consumed", () => {
+  for (const storage of ["sqlite", "memory"] as const) {
+    it.effect(`does not re-drive a later approval on ${storage}`, () =>
+      withCrypto(
+        Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* RunStore.RunStore
+            const persisted = yield* DurableEngineState.DurableEngineState
+            const state = storage === "memory" ? DurableEngineState.makeMemory() : persisted
+            const journal = yield* Journal.Journal
+            const gate = DurableDeferred.make("consumed-A", { success: Schema.String })
+            const flow = Flow.make(`DeferredRestart/Consumed/${storage}`, {
+              payload: {},
+              success: Schema.String,
+              body: opaqueHandlerBody
+            })
+            const drives: Array<string> = []
+            const handler = () =>
+              Effect.gen(function*() {
+                const instance = yield* FlowRuntime.FlowInstance
+                drives.push(instance.executionId)
+                yield* DurableDeferred.await(gate)
+                instance.waiting = { reason: "approval", token: "approval-B" }
+                return yield* Flow.suspend(instance)
+              })
+            const makeEngine = EngineStore.make({
+              owner: { hostId: "consumed-restart-host" },
+              journalSource: "consumed-restart-test",
+              isAlive: () => Effect.succeed(false)
+            }).pipe(Effect.provideService(DurableEngineState.DurableEngineState, state))
+            const complete = (executionId: string) =>
+              state.completeDeferred({
+                flowName: flow._tag,
+                executionId,
+                deferredName: gate.name,
+                exit: Exit.succeed("ready"),
+                completedAtMs: 0
+              })
+            yield* Effect.scoped(Effect.gen(function*() {
+              const engine = yield* makeEngine
+              yield* engine.register(flow, handler)
+              for (const executionId of ["consumed", "unobserved"]) {
+                yield* engine.execute(flow, { executionId, payload: {}, discard: true })
+              }
+              yield* complete("consumed")
+              yield* engine.execute(flow, { executionId: "consumed", payload: {}, discard: true })
+            }))
+            expect(Option.getOrThrow(yield* state.waiting("consumed")).reason).toBe("approval")
+            expect(Option.getOrThrow(yield* state.waiting("unobserved")).reason).toBe("event")
+            // The second completion lands with no engine listening to its wake.
+            yield* complete("unobserved")
+            const consumedBefore = yield* store.get("consumed")
+            yield* journal.flush
+            const entriesBefore = yield* journal.entries({ runId: "consumed" as never, limit: 500 })
+            drives.length = 0
+
+            const restarted = yield* makeEngine
+            yield* restarted.register(flow, handler)
+            // Wait for the control's wake to finish without explicitly executing
+            // either run. Registration alone must recover its unobserved result.
+            for (let count = 0; count < 400; count++) {
+              const waiting = yield* state.waiting("unobserved")
+              if (
+                Option.isSome(waiting) && waiting.value.reason === "approval" &&
+                (yield* store.get("unobserved")).status === "suspended"
+              ) break
+              yield* Effect.yieldNow
+            }
+            expect(Option.getOrThrow(yield* state.waiting("unobserved")).reason).toBe("approval")
+            // A further registration cannot re-deliver either observed completion.
+            yield* restarted.register(flow, handler)
+            yield* Effect.yieldNow
+            yield* journal.flush
+            expect(drives).toEqual(["unobserved"])
+            expect(yield* store.get("consumed")).toEqual(consumedBefore)
+            expect(yield* journal.entries({ runId: "consumed" as never, limit: 500 })).toEqual(entriesBefore)
+            expect(yield* state.completedDeferreds(flow._tag)).toEqual([])
+            // Consumption only changes sweep eligibility, never replay evidence.
+            expect(
+              Option.getOrThrow(
+                yield* state.deferred({
+                  flowName: flow._tag,
+                  executionId: "consumed",
+                  deferredName: gate.name
+                })
+              ).exit
+            ).toEqual(Exit.succeed("ready"))
+          }).pipe(
+            Effect.provide(StepBoundary.layerTest()),
+            Effect.provideService(Jj.Jj, jj)
+          )
+        ).pipe(Effect.provide(TestStores.layerAt(":memory:")))
+      ))
+  }
+})
+
 describe("partial dependency readiness across a restart", () => {
   const first = DurableDeferred.make("partial-first", { success: Schema.String })
   const second = DurableDeferred.make("partial-second", { success: Schema.String })

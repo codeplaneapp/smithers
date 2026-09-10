@@ -526,6 +526,35 @@ describe("DeferredPersistence", () => {
       expect(resumes).toEqual(["completion-during-downtime:deferred"])
     }))
 
+  it.effect("stops sweeping a completion once deferredResult has served it", () =>
+    withCrypto(Effect.scoped(Effect.gen(function*() {
+      const state = DurableEngineState.makeMemory()
+      const journal = makeJournal([])
+      const resumes: Array<string> = []
+      const service = yield* build(state, journal, resumes)
+      const address = {
+        flowName: TestFlow._tag,
+        executionId: "consumed-completion",
+        deferredName: "answer"
+      }
+      const deferred = DurableDeferred.make("answer", { success: Schema.String })
+      const result = service.deferredResult(deferred).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, FlowEngine.makeInstance(TestFlow, address.executionId))
+      )
+      expect(yield* result).toEqual(Option.none())
+      yield* state.completeDeferred({ ...address, exit: Exit.succeed("ready"), completedAtMs: 1 })
+      yield* service.sweepDue(TestFlow._tag)
+      expect(resumes).toEqual(["consumed-completion:deferred"])
+      expect(yield* result).toEqual(Option.some(Exit.succeed("ready")))
+      // Point reads and replay retain the first result, including after a
+      // duplicate completion. Neither operation re-arms registration recovery.
+      yield* state.completeDeferred({ ...address, exit: Exit.succeed("duplicate"), completedAtMs: 2 })
+      expect(yield* result).toEqual(Option.some(Exit.succeed("ready")))
+      const restarted = yield* build(state, journal, resumes)
+      yield* restarted.sweepDue(TestFlow._tag)
+      expect(resumes).toEqual(["consumed-completion:deferred"])
+    }))))
+
   it.effect("uses one stable wake identity across repeated registration sweeps", () =>
     Effect.gen(function*() {
       const sourceIds: Array<string> = []

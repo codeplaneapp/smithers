@@ -55,7 +55,7 @@ describe("SQL DurableEngineState", () => {
         ...set,
         migrations: Object.fromEntries(
           Object.entries(set.migrations).filter(([key]) =>
-            !(set.namespace === "engine-store" && key === "0007_run_parent_sequence")
+            !(set.namespace === "engine-store" && key >= "0007_run_parent_sequence")
           )
         )
       }))
@@ -73,6 +73,43 @@ describe("SQL DurableEngineState", () => {
       ])
       expect(yield* state.runParents("child")).toEqual([{ childId: "child", parentId: "parent", seq: 2 }])
     }).pipe(Effect.provide(TestDatabase.layer)))
+
+  it.effect("upgrades existing completions as unconsumed and persists their first observation", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const previous = Migrations.sets.map((set) => ({
+          ...set,
+          migrations: Object.fromEntries(
+            Object.entries(set.migrations).filter(([key]) =>
+              !(set.namespace === "engine-store" && key >= "0008_deferred_consumption")
+            )
+          )
+        }))
+        yield* DatabaseMigrations.run(previous)
+        yield* insertOwnedRun("pre-consumption-migration")
+        const first = yield* DurableEngineState.make
+        const row = {
+          flowName: "DurableState/Upgrade",
+          executionId: "pre-consumption-migration",
+          deferredName: "answer",
+          exit: Exit.succeed("legacy"),
+          completedAtMs: 10
+        }
+        yield* first.completeDeferred(row)
+        yield* Migrations.run
+        expect(yield* Migrations.run).toEqual([])
+        const upgraded = yield* DurableEngineState.make
+        expect(yield* upgraded.completedDeferreds(row.flowName)).toHaveLength(1)
+        yield* upgraded.consumeDeferred(row, 20)
+        const restarted = yield* DurableEngineState.make
+        yield* restarted.consumeDeferred(row, 30)
+        yield* restarted.completeDeferred({ ...row, exit: Exit.succeed("duplicate") })
+        expect(yield* restarted.completedDeferreds(row.flowName)).toEqual([])
+        expect(Option.getOrThrow(yield* restarted.deferred(row)).exit).toEqual(Exit.succeed("legacy"))
+        const sql = yield* SqlClient.SqlClient
+        expect(yield* sql`SELECT consumed_at_ms FROM flows_deferred_completions`).toEqual([{ consumed_at_ms: 20 }])
+      }).pipe(Effect.provide(TestDatabase.layer))
+    ))
 
   it.effect("preserves the first deferred completion across competing services", () =>
     Effect.gen(function*() {

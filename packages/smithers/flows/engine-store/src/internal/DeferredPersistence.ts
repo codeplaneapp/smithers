@@ -369,11 +369,17 @@ export const make = (
     return {
       deferredResult: Effect.fn("DeferredPersistence.deferredResult")(function*(deferred) {
         const instance = yield* FlowRuntime.FlowInstance
-        const row = yield* state.deferred({
+        const address = {
           flowName: instance.flow._tag,
           executionId: instance.executionId,
           deferredName: deferred.name
-        })
+        }
+        const row = yield* state.deferred(address)
+        if (Option.isSome(row)) {
+          // Keep the result for replay, but stop registration from waking a
+          // run that already observed it and may now be parked on another wait.
+          yield* state.consumeDeferred(address, yield* Clock.currentTimeMillis)
+        }
         return Option.map(row, (value) => value.exit as Exit.Exit<unknown, unknown>)
       }),
       deferredDone: Effect.fn("DeferredPersistence.deferredDone")(completeDeferred),
