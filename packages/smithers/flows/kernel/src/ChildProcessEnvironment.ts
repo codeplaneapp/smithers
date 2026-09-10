@@ -7,16 +7,17 @@
 /**
  * Credential-bearing field names shared with the model request boundary.
  *
- * `token` is anchored to a complete or separator-delimited suffix so numeric
- * token-count fields remain ordinary diagnostics. Keeping this rule below the
- * model and process layers gives request validation and child spawning one
- * definition of a sensitive name.
+ * `token`, `key` (optionally followed by a separated `id`), and `pat` are
+ * anchored to complete or separator-delimited suffixes so names such as
+ * `TOKEN_COUNT` and `KEYBOARD` remain ordinary diagnostics. Keeping this rule
+ * below the model and process layers gives request validation and child
+ * spawning one definition of a sensitive name.
  *
  * @category constants
  * @since 1.0.0-rc.0
  */
 export const credentialNamePattern =
-  /authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|api[-_]?token|session[-_]?token|bearer|(?:^|[-_])token$|secret|credential|password|passphrase|passwd|signature|x-amz-signature|cookie|set[-_]?cookie|chatgpt[-_]?account[-_]?id/i
+  /authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|api[-_]?token|session[-_]?token|bearer|(?:^|[-_])token$|(?:^|[-_])key(?:[-_]id)?$|(?:^|[-_])pat$|secret|credential|password|passphrase|passwd|signature|x-amz-signature|cookie|set[-_]?cookie|chatgpt[-_]?account[-_]?id/i
 
 /**
  * Reports whether a field name conventionally carries credentials.

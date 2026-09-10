@@ -734,7 +734,7 @@ Least-authority construction for a child process's replacement environment.
 | Export                  | Type                                             | Meaning                                                                                         |
 | ----------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | `inheritedNames`        | `ReadonlyArray<string>`                          | `PATH`, `HOME`, `USER`, `LANG`, `TERM`, `TMPDIR`, and `SHELL`; `LC_*` is admitted by prefix.    |
-| `credentialNamePattern` | `RegExp`                                         | The credential-name rule shared with `@smthrs/model/Auth`.                                      |
+| `credentialNamePattern` | `RegExp`                                         | The credential-name rule shared with `@smthrs/model/Auth`, including complete or separator-delimited `token`, `key`, `key_id`, and `pat` suffixes. |
 | `isCredentialName`      | `(name: string) => boolean`                      | Tests one name against that rule.                                                               |
 | `make`                  | `(ambient, declared?) => Record<string, string>` | Selects bootstrap names, withholds sensitive ambient names, and overlays explicit declarations. |
 

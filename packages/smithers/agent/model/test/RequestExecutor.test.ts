@@ -773,14 +773,21 @@ describe("RequestExecutor", () => {
       "x-api-key": "sensitive-header-api-key",
       secret_key: "sensitive-secret-key",
       private_key: "sensitive-private-key",
-      key: "sensitive-bare-key"
+      key: "sensitive-bare-key",
+      public_key_id: "sensitive-public-key-id-value",
+      AWS_ACCESS_KEY_ID: "sensitive-aws-access-key-id",
+      SSH_KEY: "sensitive-ssh-key",
+      GPG_KEY: "sensitive-gpg-key",
+      ENCRYPTION_KEY: "sensitive-encryption-key",
+      MASTER_KEY: "sensitive-master-key",
+      GITHUB_PAT: "sensitive-github-pat"
     }
     const publicFields = {
       max_tokens: "public-max-tokens-value",
       budget_tokens: "public-budget-tokens-value",
       keyword: "public-keyword-value",
       monkey: "public-monkey-value",
-      public_key_id: "public-key-id-value"
+      public_key_ids: "public-key-ids-value"
     }
     const diagnostic = Object.values({ ...sensitive, ...publicFields }).join(" ")
     const error = await errorFor(
