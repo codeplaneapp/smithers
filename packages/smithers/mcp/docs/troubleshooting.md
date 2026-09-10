@@ -135,7 +135,8 @@ outbound queue is full or the method is `initialize`.
 **What happened.** The session ended. Every request pending at that moment
 failed with this one error, and every later request fails with it too. A clean
 child exit ends stdout successfully, so an ordinary exit reads as "stdout
-closed" or "exited with code N".
+closed" or "exited with code N". Closing a healthy connection's scope reports
+"connection scope closed" before I/O teardown can report "stdin closed".
 
 **What to change.** "Connection scope closed" is usually the caller's own bug:
 the scope was closed while a call was still running, or a client was used after
@@ -164,9 +165,14 @@ than N bytes`, means your own arguments exceeded `maxOutboundFrameBytes`.
 **Code.** `protocol_error`.
 
 **What happened.** A line that claimed JSON-RPC by carrying a `jsonrpc` property
-was not a valid reply: the wrong version, no id, an id that is not an integer or
-a canonical decimal string, neither `result` nor `error`, both of them, or a
-malformed error object. This closes the connection.
+was not a valid reply: the wrong version, no id, an invalid id, neither `result`
+nor `error`, both of them, or a malformed error object. This closes the connection.
+
+Reply ids must be integers or canonical decimal strings. A valid error reply
+with `id: null` is the exception: its details go to the private diagnostic
+observer as `remote-error`, then it is dropped without closing the connection.
+Pending requests still wait for their own replies or deadlines. A result with
+`id: null` is malformed.
 
 **What to change.** Fix the server's framing. Note what does **not** cause this:
 a blank line, invalid JSON, a JSON scalar or array, and any object without a

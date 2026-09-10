@@ -378,10 +378,6 @@ export const connect = (
           })))
       }))
 
-    // Scope closure tears down the child, so no remote process remains to
-    // receive per-request cancellations from this connection finalizer.
-    yield* Effect.addFinalizer(() => closeWith(closed(options.server, "connection scope closed"), false))
-
     // Writer: drains outbound frames into the process's stdin for the life of
     // the connection scope. A write failure is the same "connection is gone"
     // fact the reader loop reports, so it collapses pending requests too.
@@ -440,6 +436,10 @@ export const connect = (
               )
             )
           }
+          if (reply._tag === "UncorrelatedError") {
+            diagnostic("remote-error", { code: reply.code, message: reply.message, data: reply.data })
+            return
+          }
           const pending = yield* Ref.modify(state, (current) => {
             if (current._tag === "Closed") return [Option.none<Pending>(), current] as const
             return [
@@ -478,6 +478,11 @@ export const connect = (
       Effect.catch(() => closeWith(closed(options.server, "process exited"))),
       Effect.forkScoped
     )
+
+    // Finalizers run in reverse order. Record scope closure before interrupting
+    // the I/O fibers, whose cleanup must not replace it with "stdin closed".
+    // Scope closure also tears down the child, so no cancellation is needed.
+    yield* Effect.addFinalizer(() => closeWith(closed(options.server, "connection scope closed"), false))
 
     const takePending = (id: number): Effect.Effect<boolean> =>
       Ref.modify(state, (current) => {

@@ -65,6 +65,35 @@ const assertDiagnostic = (error: McpError, events: ReadonlyArray<Diagnostics.Eve
 }
 
 describe("terminal stderr drainage", () => {
+  it("reports scope closure for pending and subsequent requests while the child is healthy", async () => {
+    let released = false
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const connectionScope = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(connectionScope, Exit.void))
+        const written = yield* Deferred.make<void>()
+        const transport = yield* connect({
+          stdin: Sink.forEach((_chunk: Uint8Array) => Deferred.succeed(written, undefined))
+        }, () => {
+          released = true
+        }).pipe(Scope.provide(connectionScope))
+        const pending = yield* Effect.forkChild(Effect.flip(transport.request("tools/call")), {
+          startImmediately: true
+        })
+        yield* Deferred.await(written)
+        expect(released).toBe(false)
+        yield* Scope.close(connectionScope, Exit.void)
+        const error = yield* Fiber.join(pending)
+        expect(error).toMatchObject({
+          code: "connection_closed",
+          message: "MCP server \"terminal-drain\" connection scope closed"
+        })
+        expect(yield* Effect.flip(transport.request("after-close"))).toBe(error)
+        expect(released).toBe(true)
+      })).pipe(Effect.provide(TestClock.layer()))
+    )
+  })
+
   it("retains stderr consumed before exit without spending the drain budget", async () => {
     const events: Array<Diagnostics.Event> = []
     const error = await Effect.runPromise(
@@ -337,6 +366,43 @@ const resultFrame = (id: number, result: string): Uint8Array =>
   new TextEncoder().encode(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`)
 
 describe("request lifecycle", () => {
+  it("reports an uncorrelated error privately and still resolves the pending tool call", async () => {
+    const events: Array<Diagnostics.Event> = []
+    await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const written = yield* Deferred.make<number>()
+        const reply = yield* Deferred.make<Uint8Array>()
+        const transport = yield* connect({
+          stdin: Sink.forEach((chunk: Uint8Array) => Deferred.succeed(written, decodeFrame(chunk).id!)),
+          stdout: Stream.concat(Stream.fromEffect(Deferred.await(reply)), Stream.never)
+        })
+        const pending = yield* Effect.forkChild(transport.request("tools/call"), { startImmediately: true })
+        const id = yield* Deferred.await(written)
+        yield* Deferred.succeed(
+          reply,
+          new TextEncoder().encode([
+            JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32_700, message: secret, data: "context" } }),
+            JSON.stringify({ jsonrpc: "2.0", id, result: "tool-result" }),
+            ""
+          ].join("\n"))
+        )
+        expect(yield* Fiber.join(pending)).toBe("tool-result")
+        yield* transport.notify("still-open")
+        expect(events).toHaveLength(1)
+        expect(events[0]!.source).toBe("remote-error")
+        expect(JSON.parse(Redacted.value(events[0]!.detail))).toEqual({
+          code: -32_700,
+          message: secret,
+          data: "context"
+        })
+        expect(JSON.stringify(events)).not.toContain(secret)
+      })).pipe(
+        Effect.provide(TestClock.layer()),
+        Effect.provide(Diagnostics.layer((event) => events.push(event)))
+      )
+    )
+  })
+
   it.each(["timeout", "interrupt"] as const)("skips a queued request after %s", async (abandon) => {
     await Effect.runPromise(
       Effect.scoped(Effect.gen(function*() {

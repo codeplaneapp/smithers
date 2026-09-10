@@ -59,7 +59,7 @@ export interface Inbound {
 
 /**
  * A validated JSON-RPC reply, normalized to the numeric request id this
- * client uses for correlation.
+ * client uses for correlation, or an error whose null id cannot be correlated.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -71,6 +71,11 @@ export type Reply = {
 } | {
   readonly _tag: "Error"
   readonly id: number
+  readonly code: number
+  readonly message: string
+  readonly data: unknown
+} | {
+  readonly _tag: "UncorrelatedError"
   readonly code: number
   readonly message: string
   readonly data: unknown
@@ -136,7 +141,8 @@ const malformed = (reason: string): Reply => ({ _tag: "Malformed", reason })
  * Digit-string ids are accepted only in their canonical ASCII decimal form,
  * then converted back to the safe integer id used by the pending-request map.
  * A reply must carry an own id and exactly one own `result` or `error`
- * property.
+ * property. A null id is accepted only for a valid error, which cannot settle
+ * any particular request.
  *
  * @category conversions
  * @since 1.0.0-rc.0
@@ -149,13 +155,16 @@ export const replyOf = (message: Inbound): Reply => {
     : typeof rawId === "string" && /^(0|[1-9][0-9]*)$/.test(rawId)
     ? Number(rawId)
     : Number.NaN
-  if (!Number.isSafeInteger(id)) return malformed("a reply id must be a JSON-RPC integer")
+  if (rawId !== null && !Number.isSafeInteger(id)) return malformed("a reply id must be a JSON-RPC integer")
 
   const hasResult = Object.hasOwn(message, "result")
   const hasError = Object.hasOwn(message, "error")
   if (!hasResult && !hasError) return malformed("a reply carried neither result nor error")
   if (hasResult && hasError) return malformed("a reply carried both result and error")
-  if (hasResult) return { _tag: "Result", id, result: message.result }
+  if (hasResult) {
+    if (rawId === null) return malformed("a reply id must be a JSON-RPC integer")
+    return { _tag: "Result", id, result: message.result }
+  }
 
   const error = message.error
   if (
@@ -166,6 +175,9 @@ export const replyOf = (message: Inbound): Reply => {
     return malformed("a reply carried a malformed error object")
   }
   const record = error as { readonly code: number; readonly message: string; readonly data?: unknown }
+  if (rawId === null) {
+    return { _tag: "UncorrelatedError", code: record.code, message: record.message, data: record.data }
+  }
   return {
     _tag: "Error",
     id,

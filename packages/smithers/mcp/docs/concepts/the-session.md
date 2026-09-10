@@ -69,7 +69,8 @@ Whichever arrives first wins. It closes the connection once, fails every pending
 request with that one error, and rejects all later traffic with the same error,
 so a caller never waits on a reply that can no longer come. A clean child exit
 is still a closed session: Node reports an ordinary exit by ending stdout
-successfully.
+successfully. When a healthy connection's scope closes, its terminal reason is
+recorded before I/O teardown, so cleanup does not report "stdin closed".
 
 For `spawn_failed`, `timeout`, and `connection_closed`, the message withholds
 process details. A child's stderr may contain credentials, including fragments
@@ -102,6 +103,12 @@ reader. This implements the negotiated
 A malformed tagged envelope closes the connection with `protocol_error`. A
 well-formed reply for an id nobody is waiting on is dropped. The raw frame is
 never attached to the error.
+
+A valid error reply with `id: null` cannot be correlated to a request. Its code,
+message, and data go only to the private diagnostic observer as `remote-error`,
+then the reply is dropped. The connection stays open and pending requests keep
+waiting for their own replies or deadlines. A null id on a result, or a malformed
+error object with a null id, still closes the connection with `protocol_error`.
 
 ## Cancelling
 

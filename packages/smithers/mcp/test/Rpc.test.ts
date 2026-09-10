@@ -108,6 +108,24 @@ describe("Rpc.classify", () => {
 })
 
 describe("Rpc.replyOf", () => {
+  it.each([-32_700, -32_600])("classifies an id:null error %s as uncorrelated", (code) => {
+    const message = { jsonrpc: "2.0", id: null, error: { code, message: "rejected", data: "context" } }
+    const expected = { _tag: "UncorrelatedError", code, message: "rejected", data: "context" }
+    expect(Rpc.replyOf(message)).toEqual(expected)
+    expect(Rpc.classify(message)).toEqual(expected)
+  })
+
+  it.each([
+    {},
+    { result: null },
+    { result: null, error: { code: -32_700, message: "rejected" } },
+    { error: null },
+    { error: { code: "-32700", message: "rejected" } },
+    { error: { code: -32_700 } }
+  ])("rejects malformed id:null reply %#", (fields) => {
+    expect(Rpc.replyOf({ jsonrpc: "2.0", id: null, ...fields })._tag).toBe("Malformed")
+  })
+
   it("rejects a reply carrying no id", () => {
     expect(Rpc.replyOf({ jsonrpc: "2.0", result: null } as unknown as Parameters<typeof Rpc.replyOf>[0])).toEqual({
       _tag: "Malformed",
