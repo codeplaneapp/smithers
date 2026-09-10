@@ -8,8 +8,8 @@
 OPENAI_API_KEY=
 
 # JSON-RPC the Tevm fork reads chain state from. Any archive-capable endpoint.
-# Only test/tevm.test.ts reads it; the Worker never does, so it is not a deploy
-# secret.
+# layerTevm reads it from the process environment unless options.rpcUrl is set.
+# The shipped Worker uses the mock; a real Worker host must pass its binding as rpcUrl.
 TEVM_FORK_RPC_URL=
 
 # 1 streams the mock turn (milestone 1). 0 asks for the real Agent.run path,

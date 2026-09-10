@@ -123,6 +123,27 @@ in-memory EVM fork, six panes, a full Worker, and a Cloudflare deploy.
 - **Tests.** Every flow replays a fixture, plus suites for the wire contract,
   the stream, the turn, the Worker, and the Tevm fork.
 
+### Chain tool configuration
+
+`TOOLS.ts` composes the deterministic Tevm mock with an empty grant. A host
+using `layerTevm` supplies `TevmOptions.rpcUrl`, or sets `TEVM_FORK_RPC_URL` in
+the process environment. Worker hosts pass the binding as `rpcUrl`; the
+shipped Worker still uses the mock. `tevm/fork` accepts only `blockTag` and
+cannot select an endpoint. Its block defaults to `TevmOptions.blockTag`, then
+`latest`. Failed lazy connections are retried on the next call.
+
+Build `tevmSource` from that layer's service context. Every real binding,
+including `mine` and `setAccount`, declares
+`net:post:<configured origin>/*` because any first call can open the fork.
+Give the host tool layer the matching grant:
+`{ action: "net:post", resource: new URL(rpcUrl).origin + "/*" }`.
+The origin omits credentials, paths, and query parameters.
+
+`tevm/mine` accepts an integer `blocks` from 1 to 256 (default 1) and an
+integer `intervalSeconds` from 0 to 86400 (default 12). `tevm/simulate` accepts
+at most 256 calls, including an empty list. Inputs outside these bounds
+return `invalid_input` before a handler runs.
+
 ### The turn is mocked by default
 
 `APP_MOCK_TURN` defaults to `1`, and the Worker streams a fixed sequence of
@@ -146,7 +167,7 @@ each:
 | Variable            | What reads it                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------- |
 | `OPENAI_API_KEY`    | Seat resolution, for the `openai:` seats the template ships                                             |
-| `TEVM_FORK_RPC_URL` | The fork test only. The Worker never reads it, so it is not a deploy secret                             |
+| `TEVM_FORK_RPC_URL` | The real Tevm layer and fork test. The shipped Worker uses the mock                                     |
 | `APP_MOCK_TURN`     | The Worker's turn path                                                                                  |
 | `APP_API_TOKEN`     | The API guard. Unset means the API is open, which is what `pnpm dev` wants and a public domain does not |
 

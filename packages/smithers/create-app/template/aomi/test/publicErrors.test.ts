@@ -75,7 +75,7 @@ const chain = tevmSource(Context.make(Tevm, {
 
 test.each(
   [
-    ["tevm/fork", { rpcUrl: "https://example.invalid" }],
+    ["tevm/fork", {}],
     ["tevm/getBalance", { address: "0x1" }],
     ["tevm/readContract", { address: "0x1", abi: [], functionName: "balanceOf" }],
     ["tevm/call", { to: "0x1", data: "0x" }],
@@ -103,7 +103,9 @@ test("real TEVM handler withholds SDK diagnostics while retaining the host cause
       const failure = yield* Effect.flip(service.getBlock({}))
       expect(failure.cause).toBe(cause)
       const result = yield* Effect.promise(() => invoke(tevmSource(services), "tevm/getBlock", {}))
-      expect(result.message).toBe("Flow tevm/getBlock failed: getBlock failed.")
+      expect(result.message).toBe(
+        "Flow tevm/getBlock failed: getBlock failed. Retry the call or use tevm/fork to reopen the configured fork."
+      )
       expect(JSON.stringify(result)).not.toContain("SYNTHETIC_HOST_SECRET")
     })))
   } finally {

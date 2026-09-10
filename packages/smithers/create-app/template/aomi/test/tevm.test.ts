@@ -16,7 +16,7 @@
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import { beforeAll, describe, expect, test } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest"
 import {
   CallOutput,
   ForkOutput,
@@ -149,7 +149,7 @@ describe("layerMock", () => {
   })
 
   test("fork decodes as ForkOutput", async () => {
-    const output = await Effect.runPromise(mock.fork({ rpcUrl: "https://example.invalid" }))
+    const output = await Effect.runPromise(mock.fork({}))
     expect(() => Schema.decodeUnknownSync(ForkOutput)(output)).not.toThrow()
     expect(output.chainId).toBe(1)
   })
@@ -177,6 +177,9 @@ describe("layerMock", () => {
 })
 
 describe("layerTevm without a fork", () => {
+  beforeEach(() => vi.stubEnv("TEVM_FORK_RPC_URL", undefined))
+  afterEach(() => vi.unstubAllEnvs())
+
   test("a binding called before tevm/fork fails with a message naming it", async () => {
     const chain = await serviceOf(layerTevm({}))
     const failure = await Effect.runPromise(Effect.flip(chain.getBalance({ address: VITALIK })))
@@ -225,11 +228,11 @@ if (RPC_URL === undefined) {
       chain = await serviceOf(layerTevm(forkOptions))
       // Open the fork once. Every later test reads the same in-memory chain,
       // so the suite costs one fork rather than one per test.
-      await Effect.runPromise(chain.fork(forkOptions))
+      await Effect.runPromise(chain.fork(forkBlock === undefined ? {} : { blockTag: forkBlock }))
     }, 120_000)
 
     test("fork reports the chain it connected to", async () => {
-      const forked = await Effect.runPromise(chain.fork(forkOptions))
+      const forked = await Effect.runPromise(chain.fork(forkBlock === undefined ? {} : { blockTag: forkBlock }))
       expect(() => Schema.decodeUnknownSync(ForkOutput)(forked)).not.toThrow()
       expect(forked.chainId).toBe(1)
       expect(forked.blockNumber).toMatch(/^\d+$/)

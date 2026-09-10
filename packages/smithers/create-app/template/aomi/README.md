@@ -55,6 +55,19 @@ A recording reads the credential for the provider `AGENT.ts` names, and
 `test/tevm.test.ts` reads `TEVM_FORK_RPC_URL` for its fork. Put both in
 `.dev.vars` for local runs; see `.dev.vars.example`.
 
+The shipped `TOOLS.ts` uses the deterministic Tevm mock with an empty grant.
+A host using `layerTevm` sets `TevmOptions.rpcUrl` or exports
+`TEVM_FORK_RPC_URL` in the process environment; Worker hosts pass the binding
+as `rpcUrl`. Build `tevmSource` from that service and grant only
+`{ action: "net:post", resource: new URL(rpcUrl).origin + "/*" }`.
+`tevm/fork` accepts only `blockTag`, defaults to the host's configured block,
+and cannot change the endpoint. A failed initial connection retries on the
+next call.
+
+Mining accepts 1–256 blocks and an integer interval of 0–86400 seconds.
+Simulation accepts at most 256 calls. Out-of-range input returns
+`invalid_input` to the model.
+
 ## Deploying
 
 Set the credential for the provider the app's seat names. `AGENT.ts` seats

@@ -5,15 +5,15 @@
  * against the workspace sources the scaffolded app would install. Every
  * specifier that suite reaches resolves that way except one: `tevm` is an
  * external dependency of the template alone, nothing in this workspace depends
- * on it, and the gate may not install one. It is reached only because
+ * on it, and the gate may not install one. Most suites reach it because
  * `TOOLS.ts` declares the chain tool source, which `routes.gen.ts` imports.
  *
- * So the gate points `tevm` and `tevm/common` here. Every export throws. The
- * suite under gate never calls a chain tool — `test/tevm.test.ts` does, and
- * that file is excluded because it needs the real client — so nothing here is
- * a stand-in for behaviour: it is a tripwire. A test that starts depending on
- * the chain tools fails on the first call with the reason, rather than passing
- * against a fake.
+ * So the gate points `tevm` and `tevm/common` here. Every export throws.
+ * `tevm-binding.test.ts` explicitly replaces the SDK to test the binding and
+ * connection lifecycle; `test/tevm.test.ts` needs the real client and remains
+ * excluded. Nothing here is a stand-in for behaviour: it is a tripwire. Any
+ * other test that starts depending on the chain tools fails on the first call
+ * with the reason.
  */
 
 const absent = (name: string) => (): never => {

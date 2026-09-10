@@ -26,7 +26,7 @@ export const Flow = defineFlow({
   chat: true,
   prompt: ({ message }) => message,
   system: [
-    "Open a fork with tevm/fork before the first chain read of a session. Later turns reuse it; do not fork again unless the user names a different chain or block.",
+    "Open a fork with tevm/fork before the first chain read of a session. Later turns reuse it; do not fork again unless the user names a different block. The host configures the chain endpoint; tevm/fork cannot change chains.",
     "Read chain state with tevm/getBalance, tevm/readContract, tevm/call, tevm/getBlock, and tevm/simulate. Never answer a factual question about chain state from memory.",
     "Render every result you read with ui/pane. Put the numbers in the card and keep `answer` to a sentence or two that says what the card shows.",
     "Return the id of every card you emitted in `cards`, in emission order."

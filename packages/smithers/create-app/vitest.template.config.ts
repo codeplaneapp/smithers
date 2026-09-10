@@ -22,9 +22,10 @@ import { defineConfig } from "vitest/config"
  *   `effect` across all of them so Context tags stay identical.
  * - `tevm` resolves to a module whose every export throws
  *   (`test/support/tevmAbsent.ts`). It is an external dependency of the
- *   template alone, no workspace package carries it, and nothing this gate runs
- *   calls a chain tool — the tool module is reached only because `TOOLS.ts`
- *   declares it and `routes.gen.ts` imports that.
+ *   template alone and no workspace package carries it. Most suites reach the
+ *   tool module only through `TOOLS.ts` and `routes.gen.ts`.
+ *   `tevm-binding.test.ts` replaces the SDK explicitly to test connection
+ *   recovery, endpoint selection, and input decoding without a live chain.
  *
  * `test/tevm.test.ts` is the one file excluded: it drives a real in-memory
  * chain, so it needs the real `tevm` and runs in a scaffolded app.

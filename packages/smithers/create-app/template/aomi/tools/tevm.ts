@@ -65,7 +65,6 @@ export class TevmError extends Schema.TaggedError<TevmError>()("aomi/tools/TevmE
 // ---------------------------------------------------------------------------
 
 export const ForkInput = Schema.Struct({
-  rpcUrl: Schema.String.annotate({ description: "JSON-RPC endpoint the fork reads state from" }),
   blockTag: Schema.optionalKey(BlockTag)
 })
 export type ForkInput = typeof ForkInput.Type
@@ -93,8 +92,7 @@ export type GetBalanceOutput = typeof GetBalanceOutput.Type
 export const ReadContractInput = Schema.Struct({
   address: Address,
   abi: Schema.Array(Schema.String).annotate({
-    description:
-      "Human-readable ABI signatures, for example [\"function balanceOf(address) view returns (uint256)\"]"
+    description: "Human-readable ABI signatures, for example [\"function balanceOf(address) view returns (uint256)\"]"
   }),
   functionName: Schema.String.annotate({ description: "Name of the function to read" }),
   args: Schema.optionalKey(
@@ -145,9 +143,15 @@ export const SetAccountOutput = Schema.Struct({
 export type SetAccountOutput = typeof SetAccountOutput.Type
 
 export const MineInput = Schema.Struct({
-  blocks: Schema.optionalKey(Schema.Number.annotate({ description: "How many blocks to mine; default 1" })),
+  blocks: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 256 })).annotate({
+      description: "How many blocks to mine, from 1 to 256; default 1"
+    })
+  ),
   intervalSeconds: Schema.optionalKey(
-    Schema.Number.annotate({ description: "Seconds between mined block timestamps; default 12" })
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 86400 })).annotate({
+      description: "Seconds between mined block timestamps, from 0 to 86400; default 12"
+    })
   )
 })
 export type MineInput = typeof MineInput.Type
@@ -163,7 +167,9 @@ export const SimulateInput = Schema.Struct({
     data: Hex,
     from: Schema.optionalKey(Address),
     value: Schema.optionalKey(Wei)
-  })).annotate({ description: "Calls applied in order against the same pending state" })
+  })).check(Schema.isMaxLength(256)).annotate({
+    description: "At most 256 calls applied in order against the same pending state"
+  })
 })
 export type SimulateInput = typeof SimulateInput.Type
 
@@ -208,6 +214,8 @@ export type GetBlockOutput = typeof GetBlockOutput.Type
  * `createMemoryClient`.
  */
 export interface Service {
+  /** Host-selected endpoint, used to scope the source's network capabilities. The mock has none. */
+  readonly rpcUrl?: string
   readonly fork: (input: ForkInput) => Effect.Effect<ForkOutput, TevmError>
   readonly getBalance: (input: GetBalanceInput) => Effect.Effect<GetBalanceOutput, TevmError>
   readonly readContract: (input: ReadContractInput) => Effect.Effect<ReadContractOutput, TevmError>
@@ -223,6 +231,7 @@ export class Tevm extends Context.Service<Tevm, Service>()("aomi/tools/Tevm") {}
 
 /** Options the real client needs; the mock ignores them. */
 export interface TevmOptions {
+  /** Overrides TEVM_FORK_RPC_URL; a model cannot select or replace this endpoint. */
   readonly rpcUrl?: string
   readonly blockTag?: string
 }
@@ -252,7 +261,8 @@ export const makeMock = (overrides: Partial<Service> = {}): Service =>
   Tevm.of({
     fork: () => succeed({ chainId: 1, blockNumber: MOCK_BLOCK, blockHash: MOCK_BLOCK_HASH }),
     getBalance: (input) => succeed({ address: input.address, wei: MOCK_WEI, ether: MOCK_ETHER }),
-    readContract: () => succeed({ value: MOCK_WEI, raw: `0x${(1234500000000000000000n).toString(16).padStart(64, "0")}` }),
+    readContract: () =>
+      succeed({ value: MOCK_WEI, raw: `0x${(1234500000000000000000n).toString(16).padStart(64, "0")}` }),
     call: () => succeed({ data: "0x", gasUsed: "21000", reverted: false }),
     setAccount: (input) =>
       succeed({
@@ -260,19 +270,24 @@ export const makeMock = (overrides: Partial<Service> = {}): Service =>
         balance: input.balance ?? MOCK_WEI,
         nonce: input.nonce ?? 0
       }),
-    mine: (input) => {
-      const blocks = input.blocks ?? 1
-      const first = BigInt(MOCK_BLOCK) + 1n
-      return succeed({
-        blockNumbers: Array.from({ length: blocks }, (_, index) => (first + BigInt(index)).toString())
-      })
-    },
+    mine: (input) =>
+      Effect.try({
+        try: () => {
+          const blocks = input.blocks ?? 1
+          const first = BigInt(MOCK_BLOCK) + 1n
+          return { blockNumbers: Array.from({ length: blocks }, (_, index) => (first + BigInt(index)).toString()) }
+        },
+        catch: (cause) => new TevmError({ message: "mine failed.", cause })
+      }),
     simulate: (input) =>
-      succeed({
-        results: input.calls.map(() => ({ data: "0x", gasUsed: "21000", reverted: false })),
-        balanceChanges: input.calls.flatMap((entry) =>
-          entry.from === undefined ? [] : [{ address: entry.from, before: MOCK_WEI, after: MOCK_WEI }]
-        )
+      Effect.try({
+        try: () => ({
+          results: input.calls.map(() => ({ data: "0x", gasUsed: "21000", reverted: false })),
+          balanceChanges: input.calls.flatMap((entry) =>
+            entry.from === undefined ? [] : [{ address: entry.from, before: MOCK_WEI, after: MOCK_WEI }]
+          )
+        }),
+        catch: (cause) => new TevmError({ message: "simulate failed.", cause })
       }),
     getBlock: () =>
       succeed({
@@ -412,8 +427,7 @@ const asError = (what: string, failure: CallFailure): Error =>
  * rules. Blob transactions are removed before Tevm rebuilds a forked block;
  * see {@link forkTransport}.
  */
-const commonFor = (chainId: number) =>
-  createCommon({ ...mainnet, id: chainId, loggingLevel: "warn" })
+const commonFor = (chainId: number) => createCommon({ ...mainnet, id: chainId, loggingLevel: "warn" })
 
 /** A fork transport, plus the transaction count of each block it passed through. */
 interface Fork {
@@ -482,16 +496,27 @@ const connect = async (
  * The real client.
  *
  * One fork is held per layer. `tevm/fork` replaces it; every other binding
- * reads the one already open, or opens the one `options.rpcUrl` names on first
- * use. A call with neither is a rejection naming `tevm/fork`, because the
- * alternative is answering about a chain nobody chose.
+ * reads the one already open, or opens the configured endpoint on first use.
+ * `options.rpcUrl` takes precedence over `TEVM_FORK_RPC_URL`. The model can
+ * choose a block, but cannot replace the host's endpoint. A failed initial
+ * connection is retried on the next call.
  *
  * Mining is manual. A cell that wants a transaction on-chain calls
  * `tevm/mine`, so nothing a simulation touches is committed by surprise.
  */
 export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
   Layer.sync(Tevm)(() => {
+    const rpcUrl = options.rpcUrl ?? (typeof process === "undefined" ? undefined : process.env["TEVM_FORK_RPC_URL"])
     let open: Promise<{ client: MemoryClient; fork: Fork }> | undefined
+
+    const endpoint = (): string => {
+      if (rpcUrl === undefined || rpcUrl === "") {
+        throw new TevmError({
+          message: "configure TevmOptions.rpcUrl or TEVM_FORK_RPC_URL, then call tevm/fork"
+        })
+      }
+      return rpcUrl
+    }
 
     /** Only host-authored TevmError messages are public; SDK diagnostics stay in cause. */
     const attempt = <A>(what: string, run: () => Promise<A>): Effect.Effect<A, TevmError> =>
@@ -499,7 +524,7 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
         try: run,
         catch: (cause) =>
           cause instanceof TevmError ? cause : new TevmError({
-            message: `${what} failed.`,
+            message: `${what} failed. Retry the call or use tevm/fork to reopen the configured fork.`,
             cause
           })
       })
@@ -507,13 +532,13 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
     /** The open fork, opening the configured one if this is the first call. */
     const opened = (): Promise<{ client: MemoryClient; fork: Fork }> => {
       if (open !== undefined) return open
-      if (options.rpcUrl === undefined) {
-        return Promise.reject(
-          new TevmError({ message: "no fork is open; call tevm/fork with an rpcUrl before any other tevm flow" })
-        )
-      }
-      open = connect(options.rpcUrl, options.blockTag)
-      return open
+      const pending = connect(endpoint(), options.blockTag).catch((cause) => {
+        // A concurrent explicit fork may already have replaced this attempt.
+        if (open === pending) open = undefined
+        throw cause
+      })
+      open = pending
+      return pending
     }
 
     const client = async (): Promise<MemoryClient> => (await opened()).client
@@ -523,9 +548,10 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
       (await chain.getBalance({ address: address as `0x${string}`, blockTag: tag })).toString()
 
     return Tevm.of({
+      ...(rpcUrl === undefined || rpcUrl === "" ? {} : { rpcUrl }),
       fork: (input) =>
         attempt("fork", async () => {
-          const connected = await connect(input.rpcUrl, input.blockTag)
+          const connected = await connect(endpoint(), input.blockTag ?? options.blockTag)
           open = Promise.resolve(connected)
           const chain = connected.client
           const block = await chain.getBlock({ blockTag: "latest" })
@@ -706,89 +732,91 @@ const blockAt = (tag: string | undefined): { blockNumber: bigint } | { blockTag:
 // Flow declarations
 // ---------------------------------------------------------------------------
 
-/**
- * Capabilities are declared where an upstream request can actually happen.
- * `fork` opens the transport, and every read that can miss the fork's local
- * state falls through to it, so those six declare `net:post`. `setAccount` and
- * `mine` only mutate state the fork already holds.
- */
-const NET = ["net:post:*"]
+const forkFlow = (capabilities: ReadonlyArray<string>) =>
+  Flow.make({
+    name: "tevm/fork",
+    description:
+      "Fork the host-configured chain into an in-memory EVM at a block. Call this once before any other tevm flow; every later call reads the forked state.",
+    input: ForkInput,
+    output: ForkOutput,
+    capabilities,
+    effects: undefined
+  })
 
-const forkFlow = Flow.make({
-  name: "tevm/fork",
-  description:
-    "Fork a chain into an in-memory EVM at a block. Call this once before any other tevm flow; every later call reads the forked state.",
-  input: ForkInput,
-  output: ForkOutput,
-  capabilities: NET,
-  effects: undefined
-})
+const getBalanceFlow = (capabilities: ReadonlyArray<string>) =>
+  Flow.make({
+    name: "tevm/getBalance",
+    description:
+      "Native token balance of an address on the fork. Returns wei as a decimal string plus an ether rendering.",
+    input: GetBalanceInput,
+    output: GetBalanceOutput,
+    capabilities,
+    effects: undefined
+  })
 
-const getBalanceFlow = Flow.make({
-  name: "tevm/getBalance",
-  description: "Native token balance of an address on the fork. Returns wei as a decimal string plus an ether rendering.",
-  input: GetBalanceInput,
-  output: GetBalanceOutput,
-  capabilities: NET,
-  effects: undefined
-})
+const readContractFlow = (capabilities: ReadonlyArray<string>) =>
+  Flow.make({
+    name: "tevm/readContract",
+    description:
+      "Call a view or pure contract function on the fork and decode the result. Pass human-readable ABI signatures, not a JSON ABI.",
+    input: ReadContractInput,
+    output: ReadContractOutput,
+    capabilities,
+    effects: undefined
+  })
 
-const readContractFlow = Flow.make({
-  name: "tevm/readContract",
-  description:
-    "Call a view or pure contract function on the fork and decode the result. Pass human-readable ABI signatures, not a JSON ABI.",
-  input: ReadContractInput,
-  output: ReadContractOutput,
-  capabilities: NET,
-  effects: undefined
-})
+const callFlow = (capabilities: ReadonlyArray<string>) =>
+  Flow.make({
+    name: "tevm/call",
+    description:
+      "Execute raw calldata against the fork without mining it. Reports gas used and, when the call reverts, the revert reason.",
+    input: CallInput,
+    output: CallOutput,
+    capabilities,
+    effects: undefined
+  })
 
-const callFlow = Flow.make({
-  name: "tevm/call",
-  description:
-    "Execute raw calldata against the fork without mining it. Reports gas used and, when the call reverts, the revert reason.",
-  input: CallInput,
-  output: CallOutput,
-  capabilities: NET,
-  effects: undefined
-})
+const setAccountFlow = (capabilities: ReadonlyArray<string>) =>
+  Flow.make({
+    name: "tevm/setAccount",
+    description:
+      "Overwrite an account's balance, nonce, or code on the fork. Use it to fund an address before a simulation.",
+    input: SetAccountInput,
+    output: SetAccountOutput,
+    capabilities,
+    effects: undefined
+  })
 
-const setAccountFlow = Flow.make({
-  name: "tevm/setAccount",
-  description: "Overwrite an account's balance, nonce, or code on the fork. Use it to fund an address before a simulation.",
-  input: SetAccountInput,
-  output: SetAccountOutput,
-  capabilities: [],
-  effects: undefined
-})
+const mineFlow = (capabilities: ReadonlyArray<string>) =>
+  Flow.make({
+    name: "tevm/mine",
+    description: "Mine pending transactions into new blocks on the fork and return the block numbers produced.",
+    input: MineInput,
+    output: MineOutput,
+    capabilities,
+    effects: undefined
+  })
 
-const mineFlow = Flow.make({
-  name: "tevm/mine",
-  description: "Mine pending transactions into new blocks on the fork and return the block numbers produced.",
-  input: MineInput,
-  output: MineOutput,
-  capabilities: [],
-  effects: undefined
-})
+const simulateFlow = (capabilities: ReadonlyArray<string>) =>
+  Flow.make({
+    name: "tevm/simulate",
+    description:
+      "Run a sequence of calls against the same pending state and report each result plus the balance changes they cause. Nothing is committed.",
+    input: SimulateInput,
+    output: SimulateOutput,
+    capabilities,
+    effects: undefined
+  })
 
-const simulateFlow = Flow.make({
-  name: "tevm/simulate",
-  description:
-    "Run a sequence of calls against the same pending state and report each result plus the balance changes they cause. Nothing is committed.",
-  input: SimulateInput,
-  output: SimulateOutput,
-  capabilities: NET,
-  effects: undefined
-})
-
-const getBlockFlow = Flow.make({
-  name: "tevm/getBlock",
-  description: "Header fields of one block on the fork: number, hashes, timestamp, gas, and base fee.",
-  input: GetBlockInput,
-  output: GetBlockOutput,
-  capabilities: NET,
-  effects: undefined
-})
+const getBlockFlow = (capabilities: ReadonlyArray<string>) =>
+  Flow.make({
+    name: "tevm/getBlock",
+    description: "Header fields of one block on the fork: number, hashes, timestamp, gas, and base fee.",
+    input: GetBlockInput,
+    output: GetBlockOutput,
+    capabilities,
+    effects: undefined
+  })
 
 // ---------------------------------------------------------------------------
 // The source
@@ -801,11 +829,15 @@ const getBlockFlow = Flow.make({
  * host's to supply, so the source takes a `Context` slice and closes every
  * binding over it with `FlowBinding.provide`.
  */
-export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source =>
-  FlowBinding.source("tevm", [
+export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source => {
+  const rpcUrl = Context.get(services, Tevm).rpcUrl
+  // Every real handler can lazily open the fork, including mine/setAccount.
+  // Derive the envelope from the service's actual endpoint, never model input.
+  const capabilities = rpcUrl === undefined ? [] : [`net:post:${new URL(rpcUrl).origin}/*`]
+  return FlowBinding.source("tevm", [
     FlowBinding.provide(
       FlowBinding.make({
-        flow: forkFlow,
+        flow: forkFlow(capabilities),
         publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.fork(input))
       }),
@@ -813,7 +845,7 @@ export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source 
     ),
     FlowBinding.provide(
       FlowBinding.make({
-        flow: getBalanceFlow,
+        flow: getBalanceFlow(capabilities),
         publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.getBalance(input))
       }),
@@ -821,7 +853,7 @@ export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source 
     ),
     FlowBinding.provide(
       FlowBinding.make({
-        flow: readContractFlow,
+        flow: readContractFlow(capabilities),
         publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.readContract(input))
       }),
@@ -829,7 +861,7 @@ export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source 
     ),
     FlowBinding.provide(
       FlowBinding.make({
-        flow: callFlow,
+        flow: callFlow(capabilities),
         publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.call(input))
       }),
@@ -837,7 +869,7 @@ export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source 
     ),
     FlowBinding.provide(
       FlowBinding.make({
-        flow: setAccountFlow,
+        flow: setAccountFlow(capabilities),
         publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.setAccount(input))
       }),
@@ -845,7 +877,7 @@ export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source 
     ),
     FlowBinding.provide(
       FlowBinding.make({
-        flow: mineFlow,
+        flow: mineFlow(capabilities),
         publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.mine(input))
       }),
@@ -853,7 +885,7 @@ export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source 
     ),
     FlowBinding.provide(
       FlowBinding.make({
-        flow: simulateFlow,
+        flow: simulateFlow(capabilities),
         publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.simulate(input))
       }),
@@ -861,13 +893,14 @@ export const tevmSource = (services: Context.Context<Tevm>): FlowBinding.Source 
     ),
     FlowBinding.provide(
       FlowBinding.make({
-        flow: getBlockFlow,
+        flow: getBlockFlow(capabilities),
         publicError: (error: TevmError) => error.message,
         handler: (input) => Effect.flatMap(Tevm, (chain) => chain.getBlock(input))
       }),
       services
     )
   ])
+}
 
 /**
  * The source TOOLS.ts composes today: the chain flows over the deterministic
