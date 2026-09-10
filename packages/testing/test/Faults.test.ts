@@ -33,6 +33,24 @@ import {
 
 const sleeper = () => spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" })
 
+describe("invalid process identifiers", () => {
+  it.each([0, -0, -1, NaN, 1.5, Infinity])("rejects %s without signalling anything", async (pid) => {
+    // Intercept every signal, including signal 0, so a regression cannot kill the runner.
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("intercepted signal"), { code: "ESRCH" })
+    })
+    try {
+      await expect(killProcess({ pid })).rejects.toThrow(/invalid pid/)
+      expect(isAlive(pid)).toBe(false)
+      expect(isGroupAlive(pid)).toBe(false)
+      expect(() => killGroup(pid)).not.toThrow()
+      expect(kill).not.toHaveBeenCalled()
+    } finally {
+      kill.mockRestore()
+    }
+  })
+})
+
 describe("killProcess", () => {
   it("kills a real process and waits for the operating system to reap it", async () => {
     const child = sleeper()
@@ -160,6 +178,57 @@ afterEach(() => {
 })
 
 describe("skewClock", () => {
+  it("keeps Date callable and returns the skewed instant as a string", () => {
+    const OriginalDate = Date
+    const before = Date.now()
+    live = skewClock(60_000)
+    const value = Date()
+    expect(typeof value).toBe("string")
+    expect(OriginalDate.parse(value)).toBeGreaterThanOrEqual(before + 59_000)
+    expect(OriginalDate.parse(value)).toBeLessThanOrEqual(Date.now())
+    // Date's call form ignores arguments, unlike construction.
+    const calledAt = Date.now()
+    const ignoredArgument = Reflect.apply(Date, undefined, [0])
+    expect(OriginalDate.parse(ignoredArgument)).toBeGreaterThanOrEqual(calledAt - 999)
+    expect(OriginalDate.parse(ignoredArgument)).toBeLessThanOrEqual(Date.now())
+  })
+
+  it.each([false, true])("restores the real clock with overlapping skews (reverse: %s)", (reverse) => {
+    const OriginalDate = Date
+    const originalNow = Date.now
+    const first = skewClock(60_000)
+    const second = skewClock(120_000)
+    try {
+      const clocks = reverse ? [second, first] : [first, second]
+      for (const clock of clocks) {
+        clock.restore()
+        expect(Date).toBe(OriginalDate)
+        expect(Date.now).toBe(originalNow)
+      }
+    } finally {
+      first.restore()
+      second.restore()
+      // Also isolate this regression test when run against the broken implementation.
+      globalThis.Date = OriginalDate
+      OriginalDate.now = originalNow
+    }
+  })
+
+  it("preserves Date statics, prototypes, explicit arguments, and subclass construction", () => {
+    const OriginalDate = Date
+    live = skewClock(60_000)
+    expect(Date.prototype).toBe(OriginalDate.prototype)
+    expect(Date.parse).toBe(OriginalDate.parse)
+    expect(Date.UTC).toBe(OriginalDate.UTC)
+    expect(new Date()).toBeInstanceOf(Date)
+    expect(new Date()).toBeInstanceOf(OriginalDate)
+    expect(new Date(2020, 0, 2, 3, 4, 5, 6).getTime()).toBe(new OriginalDate(2020, 0, 2, 3, 4, 5, 6).getTime())
+    class CustomDate extends Date {}
+    const custom = new CustomDate()
+    expect(custom).toBeInstanceOf(CustomDate)
+    expect(custom.getTime()).toBeGreaterThanOrEqual(live.now() - 1_000)
+  })
+
   it("moves Date.now and a bare new Date forward together", () => {
     const before = Date.now()
     live = skewClock(60_000)

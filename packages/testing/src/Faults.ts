@@ -22,9 +22,11 @@ import { execFileSync } from "node:child_process"
 
 const pollIntervalMs = 25
 const defaultTimeoutMs = 5_000
+const OriginalDate = globalThis.Date
+const originalNow = OriginalDate.now
 
 /**
- * Whether a pid names a live process.
+ * Whether a positive integer pid names a live process. Invalid pids return false.
  *
  * Signal 0 performs the permission and existence check without delivering
  * anything. `ESRCH` is the only answer that means "gone"; `EPERM` means the
@@ -34,6 +36,7 @@ const defaultTimeoutMs = 5_000
  * @category refinements
  */
 export const isAlive = (pid: number): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
     return true
@@ -45,13 +48,15 @@ export const isAlive = (pid: number): boolean => {
 /**
  * Whether a process group still has a member.
  *
- * A negative pid addresses the whole group, which is the unit
- * `NodeRuntime.layerHost` containment works in.
+ * Accepts a positive integer group id and negates it to address the whole
+ * group, which is the unit `NodeRuntime.layerHost` containment works in.
+ * Invalid group ids return false.
  *
  * @since 1.0.0
  * @category refinements
  */
 export const isGroupAlive = (pgid: number): boolean => {
+  if (!Number.isInteger(pgid) || pgid <= 0) return false
   try {
     process.kill(-pgid, 0)
     return true
@@ -136,7 +141,8 @@ export const waitForReparent = async (
 }
 
 /**
- * Sends `signal` to a real pid and waits for it to leave.
+ * Sends `signal` to a positive integer pid and waits for it to leave.
+ * Invalid pids reject before any signal is sent.
  *
  * A pid that is already dead is an error rather than a no-op: the test that
  * called this believed it was injecting a fault, and it was not.
@@ -150,7 +156,7 @@ export const killProcess = async (
   timeoutMs = defaultTimeoutMs
 ): Promise<void> => {
   const pid = handle.pid
-  if (typeof pid !== "number" || !Number.isFinite(pid)) {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
     throw new Error(`killProcess: invalid pid ${String(pid)}`)
   }
   try {
@@ -166,12 +172,14 @@ export const killProcess = async (
 
 /**
  * Kills a whole process group, used to clean up what a test deliberately
- * orphaned. Never throws: this is teardown.
+ * orphaned. Invalid group ids are a no-op; valid ids must be positive integers.
+ * Never throws: this is teardown.
  *
  * @since 1.0.0
  * @category constructors
  */
 export const killGroup = (pgid: number, signal: NodeJS.Signals = "SIGKILL"): void => {
+  if (!Number.isInteger(pgid) || pgid <= 0) return
   try {
     process.kill(-pgid, signal)
   } catch {
@@ -195,29 +203,26 @@ export interface SkewedClock {
 }
 
 /**
- * Skews `Date.now` and bare `new Date()` by `skewMs` for this process.
+ * Skews `Date.now`, `Date()`, and bare `new Date()` by `skewMs` for this process.
+ * Each skew is relative to the real clock. Restoring any live handle reinstalls
+ * the module's original Date and Date.now, regardless of restoration order.
  *
  * @since 1.0.0
  * @category constructors
  */
 export const skewClock = (skewMs: number): SkewedClock => {
-  const OriginalDate = globalThis.Date
-  const originalNow = OriginalDate.now
   let skew = skewMs
   let restored = false
 
   const now = (): number => originalNow.call(OriginalDate) + skew
 
-  class SkewedDate extends OriginalDate {
-    constructor(...args: ConstructorParameters<typeof Date> | []) {
-      if (args.length === 0) super(now())
-      else super(...args)
-    }
-    static override now = now
-  }
+  const SkewedDate = new Proxy(OriginalDate, {
+    apply: () => new OriginalDate(now()).toString(),
+    construct: (target, args, newTarget) => Reflect.construct(target, args.length === 0 ? [now()] : args, newTarget)
+  })
 
   OriginalDate.now = now
-  ;(globalThis as { Date: typeof Date }).Date = SkewedDate as unknown as typeof Date
+  globalThis.Date = SkewedDate
 
   return {
     now,
@@ -228,7 +233,7 @@ export const skewClock = (skewMs: number): SkewedClock => {
       if (restored) return
       restored = true
       OriginalDate.now = originalNow
-      ;(globalThis as { Date: typeof Date }).Date = OriginalDate
+      globalThis.Date = OriginalDate
     }
   }
 }

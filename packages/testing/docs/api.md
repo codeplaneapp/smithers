@@ -1616,8 +1616,10 @@ const isGroupAlive: (pgid: number) => boolean
 
 Signal 0 performs the permission and existence check without delivering
 anything. `ESRCH` is the only answer that means "gone"; `EPERM` means the
-process exists and belongs to somebody else. A negative pid addresses a whole
-process group, which is the unit host containment works in.
+process exists and belongs to somebody else. Both helpers require a positive
+integer identifier and return `false` for invalid inputs without signalling.
+`isGroupAlive` accepts a positive group id and negates it internally to address
+the whole process group, which is the unit host containment works in.
 
 ### Faults.parentPid and waitForReparent
 
@@ -1656,7 +1658,9 @@ const killProcess: (
 
 Sends `signal` (default `SIGKILL`) to a real pid and waits for it to leave. A
 pid that is already dead is an error rather than a no-op: the test that called
-this believed it was injecting a fault, and it was not.
+this believed it was injecting a fault, and it was not. A missing pid or one
+that is not a positive integer rejects with `killProcess: invalid pid` before
+sending any signal.
 
 ### Faults.killGroup
 
@@ -1665,7 +1669,8 @@ const killGroup: (pgid: number, signal?: NodeJS.Signals) => void
 ```
 
 Kills a whole process group, used to clean up what a test deliberately
-orphaned. Never throws: this is teardown.
+orphaned. Takes a positive integer group id and negates it internally. Invalid
+group ids are a no-op. Never throws: this is teardown.
 
 ### Faults.skewClock
 
@@ -1679,9 +1684,15 @@ interface SkewedClock {
 }
 ```
 
-Skews `Date.now` and a bare `new Date()` by `skewMs` for **this process only**.
-A child does not inherit it, which is why a child runner takes an explicit skew
-instead. `restore` is idempotent.
+Skews `Date.now`, `Date()`, and a bare `new Date()` by `skewMs` for **this process
+only**. `Date()` returns a string for the skewed instant. Explicit constructor
+arguments, the Date prototype, and static parsing helpers are preserved. A
+child does not inherit the skew, so a child runner takes an explicit skew instead.
+
+Each skew is relative to the real clock, and the latest installation controls
+the global clock. Restoring any live handle reinstalls the Date constructor and
+`Date.now` captured at module load, even when handles are restored out of order.
+`restore` is idempotent; it does not reinstate an earlier skew.
 
 ## Documented limits
 
