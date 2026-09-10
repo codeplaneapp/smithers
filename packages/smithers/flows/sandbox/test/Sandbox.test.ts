@@ -512,7 +512,9 @@ describe("Sandbox.fileSystem", () => {
         `if [ -e /flat ] || [ -h /flat ]; then exit 10; elif [ ! -e "$(dirname /flat)" ]; then exit 9; else mkdir /flat; fi`,
         "rm -r -f /old",
         "if [ -e /single ] || [ -h /single ]; then rm /single; else exit 9; fi",
-        "if [ ! -e /from ] && [ ! -h /from ]; then exit 9; elif [ -d /to ]; then exit 11; else mv /from /to; fi"
+        "if [ ! -e /from ] && [ ! -h /from ]; then exit 9; elif [ -d /to ]; then " +
+        "if [ -h /to ] || [ ! -d /from ] || [ -h /from ]; then exit 11; elif [ /from -ef /to ]; then :; " +
+        "else mv -T /from /to; c=$?; if [ \"$c\" -eq 64 ]; then exit 13; fi; exit \"$c\"; fi; else mv /from /to; fi"
       ])
     }))
 
@@ -581,7 +583,7 @@ describe("Sandbox.fileSystem", () => {
       expect(provider.state.files.has("/work/dotted.txt")).toBe(true)
     }))
 
-  it.effect("reports a silent probe failure by its exit code and survives garbled stat output", () =>
+  it.effect("reports a silent probe failure by its exit code and refuses garbled stat output", () =>
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
         script: (command) =>
@@ -595,7 +597,9 @@ describe("Sandbox.fileSystem", () => {
         Effect.gen(function*() {
           const files = yield* probeSession(provider)
           const silent = yield* Effect.flip(files.exists("/broken"))
-          const garbled = yield* files.stat("/garbled")
+          // A stat probe that answers nothing is a failure, never a zero-byte
+          // file: the size contract is exact or absent.
+          const garbled = yield* Effect.flip(files.stat("/garbled"))
           // "" and "." both resolve to the workdir itself.
           yield* files.makeDirectory(".")
           yield* files.makeDirectory("")
@@ -603,8 +607,8 @@ describe("Sandbox.fileSystem", () => {
         })
       )
       expect(String(outcome.silent)).toContain("probe exited 2")
-      expect(outcome.garbled.type).toBe("Unknown")
-      expect(outcome.garbled.size).toBe(0n)
+      expect(platformReason(outcome.garbled)).toBe("Unknown")
+      expect(String(outcome.garbled)).toContain("instead of a type and a size")
       expect(provider.state.commands).toContain(
         `if [ -e /sandbox ] || [ -h /sandbox ]; then exit 10; elif [ ! -e "$(dirname /sandbox)" ]; then exit 9; else mkdir /sandbox; fi`
       )

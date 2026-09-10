@@ -209,6 +209,8 @@ const alreadyExistsExit = 10
 const badResourceExit = 11
 /** The path sits behind a directory the session may not search. */
 const deniedExit = 12
+/** The machine's utility lacks the mode the operation needs: a `mv` without `-T`. */
+const unsupportedExit = 13
 
 /**
  * Builds an Effect `FileSystem` over one sandbox session.
@@ -248,7 +250,10 @@ const deniedExit = 12
  * having to re-implement the rule.
  *
  * Honest limits of the probe dialect: `stat` reports no mode, no times, and no
- * owner (the portable shell cannot name them; its `size` is exact); a
+ * owner (the portable shell cannot name them; its `size` is exact, from the
+ * machine's `stat` where it has one and a byte count otherwise, and a size the
+ * probe cannot read fails rather than reading as zero); `rename` replaces an
+ * empty directory with a directory only where `mv` knows `-T`; a
  * directory entry whose name contains a newline is misread, because probe
  * output is line-framed. `stat` follows links the way the platform
  * implementations do, and reports `SymbolicLink` only for a dangling link.
@@ -281,18 +286,35 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
       path,
       `if [ -d ${target} ]; then t=Directory; elif [ -f ${target} ]; then t=File; ` +
         `elif [ -h ${target} ]; then t=SymbolicLink; elif [ -e ${target} ]; then t=Unknown; ` +
-        `else exit ${absentExit}; fi; s=0; if [ "$t" = File ]; then s=$(wc -c < ${target}); fi; ` +
-        `printf '%s %s' "$t" "$s"`
+        `else exit ${absentExit}; fi; s=0; if [ "$t" = File ]; then ` +
+        // Size comes from the machine's own metadata call first: GNU and
+        // busybox spell it `-c %s`, BSD `-f %z`, and `-L` follows a link the
+        // way `-f` did. Reading the bytes with `wc` is the last resort, and a
+        // failed read (a mode-000 file, a missing `wc`) fails the probe rather
+        // than leaving `s` empty for the parse to read as an honest zero.
+        `s=$(stat -L -c %s ${target} 2>/dev/null) || s=$(stat -L -f %z ${target} 2>/dev/null) || ` +
+        `s=$(wc -c < ${target}) || exit 1; fi; printf '%s %s' "$t" "$s"`
     )
     if (result.code === absentExit) return yield* Effect.fail(notFound("stat", path))
     if (result.code !== 0) return yield* Effect.fail(probeFailed("stat", path)(result))
     // BSD `wc -c` pads its count, so the fields are whitespace-run separated.
     const [type, size] = result.stdout.trim().split(/\s+/)
+    // A size that is not a whole number is a probe the shell mangled, never a
+    // file of zero bytes; the documented contract is an exact size or a failure.
+    if (size === undefined || !/^\d+$/.test(size)) {
+      return yield* Effect.fail(PlatformError.systemError({
+        _tag: "Unknown",
+        module: "FileSystem",
+        method: "stat",
+        description: `\`${path}\`: stat probe answered \`${result.stdout.trim()}\` instead of a type and a size`,
+        pathOrDescriptor: path
+      }))
+    }
     return {
       ...emptyInfo,
       /* v8 ignore next -- `split` always yields a first field, so the `type` nullish arm only discharges the indexed-access optional */
       type: fileTypes[type ?? ""] ?? "Unknown",
-      size: FileSystem.Size(BigInt(size ?? "0"))
+      size: FileSystem.Size(BigInt(size))
     } satisfies FileSystem.File.Info
   })
   const readFile = (raw: string): Effect.Effect<Uint8Array, PlatformError.PlatformError> => {
@@ -433,14 +455,35 @@ export const fileSystem = (session: Session): FileSystem.FileSystem => {
       // silently moves the source *into* it. The script probes both before
       // `mv` runs — the missing source is `NotFound` (`-h` keeps a dangling
       // symlink renameable, as it is everywhere), and a directory
-      // destination is the `EISDIR` the platform reports as `BadResource`.
+      // destination in a non-directory's way is the `EISDIR` the platform
+      // reports as `BadResource`. A directory source may still replace an
+      // empty directory or name itself, as `rename(2)` allows: the same
+      // directory (`-ef`, which every `sh` in use answers) is a no-op, and
+      // any other one goes through `mv -T`, the GNU and busybox spelling of
+      // `rename(2)` without the nesting. A `mv` without `-T` (BSD answers
+      // `EX_USAGE`, 64, before touching anything) is a refusal, never a
+      // remove-then-move emulation that could lose the destination.
       const script = `if [ ! -e ${source} ] && [ ! -h ${source} ]; then exit ${absentExit}; ` +
-        `elif [ -d ${destination} ]; then exit ${badResourceExit}; else mv ${source} ${destination}; fi`
+        `elif [ -d ${destination} ]; then ` +
+        `if [ -h ${destination} ] || [ ! -d ${source} ] || [ -h ${source} ]; then exit ${badResourceExit}; ` +
+        `elif [ ${source} -ef ${destination} ]; then :; ` +
+        `else mv -T ${source} ${destination}; c=$?; if [ "$c" -eq 64 ]; then exit ${unsupportedExit}; fi; exit "$c"; fi; ` +
+        `else mv ${source} ${destination}; fi`
       const result = yield* probe(session, "rename", oldPath, script)
       if (result.code === absentExit) return yield* Effect.fail(notFound("rename", oldPath))
       if (result.code === badResourceExit) {
         return yield* Effect.fail(
           refused("BadResource", "rename", oldPath, `the destination \`${newPath}\` is a directory in the sandbox`)
+        )
+      }
+      if (result.code === unsupportedExit) {
+        return yield* Effect.fail(
+          refused(
+            "BadResource",
+            "rename",
+            oldPath,
+            `the destination \`${newPath}\` is a directory and the sandbox's \`mv\` cannot replace one (no \`-T\`)`
+          )
         )
       }
       if (result.code !== 0) return yield* Effect.fail(probeFailed("rename", oldPath)(result))

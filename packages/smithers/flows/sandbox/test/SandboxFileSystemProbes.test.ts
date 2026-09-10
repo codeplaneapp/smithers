@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { spawnSync } from "node:child_process"
 import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -57,7 +58,8 @@ const withProbes = <A, E>(
     probed: FileSystem.FileSystem
     fs: FileSystem.FileSystem
     workdir: string
-  }) => Effect.Effect<A, E>
+  }) => Effect.Effect<A, E>,
+  prelude = ""
 ) =>
   Effect.gen(function*() {
     const { fs, spawner } = yield* services
@@ -67,7 +69,11 @@ const withProbes = <A, E>(
         const acquired = yield* provider.acquire(session)
         // Stripping the native overrides forces every derived operation
         // through the sh probes, over the same tree the reference reads.
-        const probed = Sandbox.fileSystem({ ...acquired, files: undefined })
+        const probed = Sandbox.fileSystem({
+          ...acquired,
+          files: undefined,
+          spawn: (command, options) => acquired.spawn(`${prelude}${command}`, options)
+        })
         return yield* body({ probed, fs, workdir: acquired.workdir })
       })
     )
@@ -77,6 +83,12 @@ const withProbes = <A, E>(
 const budget = 30_000
 
 const isRoot = globalThis.process.getuid?.() === 0
+/**
+ * Whether the machine's `mv` knows `-T` (GNU and busybox do; BSD answers
+ * `EX_USAGE`, 64, without touching anything), which decides whether the
+ * derived rename can replace an empty directory or must refuse.
+ */
+const mvReplacesDirectories = spawnSync("mv", ["-T"], { stdio: "ignore" }).status !== 64
 
 describe("Sandbox.fileSystem write options", () => {
   const unsupported: ReadonlyArray<NonNullable<Parameters<FileSystem.FileSystem["writeFile"]>[2]>> = [
@@ -193,6 +205,159 @@ describe("Sandbox.fileSystem write options", () => {
 })
 
 describe("Sandbox.fileSystem probes against the reference filesystem", () => {
+  it.effect.skipIf(isRoot)(
+    "stats a mode-000 file without reporting a false zero size",
+    () =>
+      withProbes("stat-unreadable", ({ fs, probed, workdir }) =>
+        Effect.gen(function*() {
+          const path = `${workdir}/sealed`
+          yield* fs.writeFileString(path, "seven!!")
+          yield* fs.chmod(path, 0o000)
+          yield* Effect.gen(function*() {
+            const reference = yield* fs.stat(path)
+            const actual = yield* probed.stat(path)
+            expect(actual.type).toBe(reference.type)
+            expect(actual.size).toBe(reference.size)
+            expect(actual.size).toBe(7n)
+          }).pipe(Effect.ensuring(Effect.orDie(fs.chmod(path, 0o600))))
+        })),
+    budget
+  )
+
+  it.effect(
+    "propagates a failed size command when native stat is unavailable",
+    () =>
+      withProbes("stat-failed-size", ({ fs, probed, workdir }) =>
+        Effect.gen(function*() {
+          yield* fs.writeFileString(`${workdir}/file`, "seven!!")
+          expect(yield* outcomeOf(probed.stat("file"))).toBe("Unknown")
+        }), "stat() { return 127; }; wc() { return 1; }; "),
+    budget
+  )
+
+  it.effect.skipIf(isRoot)(
+    "propagates wc input redirection failure when native stat is unavailable",
+    () =>
+      withProbes("stat-unreadable-fallback", ({ fs, probed, workdir }) =>
+        Effect.gen(function*() {
+          const path = `${workdir}/sealed`
+          yield* fs.writeFileString(path, "seven!!")
+          yield* fs.chmod(path, 0o000)
+          yield* Effect.gen(function*() {
+            expect(yield* outcomeOf(probed.stat(path))).toBe("Unknown")
+          }).pipe(Effect.ensuring(Effect.orDie(fs.chmod(path, 0o600))))
+        }), "stat() { return 127; }; "),
+    budget
+  )
+
+  it.effect(
+    "falls back to wc when native stat is unavailable",
+    () =>
+      withProbes("stat-wc", ({ fs, probed, workdir }) =>
+        Effect.gen(function*() {
+          yield* fs.writeFileString(`${workdir}/file`, "seven!!")
+          expect((yield* probed.stat("file")).size).toBe(7n)
+        }), "stat() { return 127; }; "),
+    budget
+  )
+
+  for (const stdout of ["", "File", "File nope", "File -1", "File 1.5"]) {
+    it.effect(`rejects invalid stat metadata ${JSON.stringify(stdout)} with a typed error`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const provider = Sandbox.TestSession.make({ script: () => ({ stdout }) })
+        const session = yield* provider.acquire("stat-invalid")
+        expect(yield* outcomeOf(Sandbox.fileSystem(session).stat("file"))).toBe("Unknown")
+      })))
+  }
+
+  it.effect.skipIf(!mvReplacesDirectories)(
+    "renames a directory onto an empty directory without nesting it",
+    () =>
+      withProbes("rename-dir-onto-empty", ({ fs, probed, workdir }) =>
+        Effect.gen(function*() {
+          for (const prefix of ["probe", "node"]) {
+            yield* fs.makeDirectory(`${workdir}/${prefix}-source`)
+            yield* fs.writeFileString(`${workdir}/${prefix}-source/child`, "payload")
+            yield* fs.makeDirectory(`${workdir}/${prefix}-dest`)
+          }
+          yield* agreement(
+            "success",
+            probed.rename("probe-source", "probe-dest"),
+            fs.rename(`${workdir}/node-source`, `${workdir}/node-dest`)
+          )
+          for (const prefix of ["probe", "node"]) {
+            expect(yield* fs.exists(`${workdir}/${prefix}-source`)).toBe(false)
+            expect(yield* fs.readDirectory(`${workdir}/${prefix}-dest`)).toEqual(["child"])
+            expect(yield* fs.readFileString(`${workdir}/${prefix}-dest/child`)).toBe("payload")
+          }
+        })),
+    budget
+  )
+
+  it.effect.skipIf(mvReplacesDirectories)(
+    "refuses a directory onto an empty directory where mv lacks -T, touching neither tree",
+    () =>
+      withProbes("rename-dir-onto-empty-unsupported", ({ fs, probed, workdir }) =>
+        Effect.gen(function*() {
+          yield* fs.makeDirectory(`${workdir}/source`)
+          yield* fs.writeFileString(`${workdir}/source/child`, "payload")
+          yield* fs.makeDirectory(`${workdir}/dest`)
+          const error = yield* Effect.flip(probed.rename("source", "dest"))
+          expect(error.reason._tag).toBe("BadResource")
+          expect(error.reason.description).toContain("cannot replace one")
+          expect(yield* fs.readDirectory(`${workdir}/source`)).toEqual(["child"])
+          expect(yield* fs.readDirectory(`${workdir}/dest`)).toEqual([])
+        })),
+    budget
+  )
+
+  it.effect("reports a mv without -T as a typed BadResource naming the destination", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const provider = Sandbox.TestSession.make({ script: () => ({ exitCode: 13 }) })
+      const session = yield* provider.acquire("rename-unsupported")
+      const error = yield* Effect.flip(Sandbox.fileSystem(session).rename("source", "dest"))
+      expect(error.reason._tag).toBe("BadResource")
+      expect(error.reason.description).toContain("`/sandbox/dest`")
+      expect(error.reason.description).toContain("no `-T`")
+    })))
+
+  it.effect(
+    "renames a directory to itself including equivalent paths",
+    () =>
+      withProbes("rename-dir-self", ({ fs, probed, workdir }) =>
+        Effect.gen(function*() {
+          yield* fs.makeDirectory(`${workdir}/source`)
+          yield* fs.writeFileString(`${workdir}/source/child`, "payload")
+          for (const destination of ["source", "source/../source"]) {
+            yield* agreement(
+              "success",
+              probed.rename("source", destination),
+              fs.rename(`${workdir}/source`, `${workdir}/${destination}`)
+            )
+          }
+          expect(yield* fs.readDirectory(`${workdir}/source`)).toEqual(["child"])
+        })),
+    budget
+  )
+
+  it.effect(
+    "refuses to replace a nonempty directory without changing either tree",
+    () =>
+      withProbes("rename-dir-onto-nonempty", ({ fs, probed, workdir }) =>
+        Effect.gen(function*() {
+          yield* fs.makeDirectory(`${workdir}/source`)
+          yield* fs.writeFileString(`${workdir}/source/child`, "source payload")
+          yield* fs.makeDirectory(`${workdir}/dest`)
+          yield* fs.writeFileString(`${workdir}/dest/held`, "destination payload")
+          expect(yield* outcomeOf(probed.rename("source", "dest"))).not.toBe("success")
+          expect(yield* fs.readDirectory(`${workdir}/source`)).toEqual(["child"])
+          expect(yield* fs.readDirectory(`${workdir}/dest`)).toEqual(["held"])
+          expect(yield* fs.readFileString(`${workdir}/source/child`)).toBe("source payload")
+          expect(yield* fs.readFileString(`${workdir}/dest/held`)).toBe("destination payload")
+        })),
+    budget
+  )
+
   it.effect(
     "refuses a rename onto an existing directory instead of moving into it",
     () =>
