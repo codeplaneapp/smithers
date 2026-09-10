@@ -62,9 +62,8 @@ const signalable = (send: (pid: number, signal: 0) => void, pid: number): boolea
  *
  * - An owner from a **different host** is alive. A pid means nothing across
  *   machines, and the process table this probe reads is only this machine's.
- * - An owner from **this host** is alive exactly while its pid is signalable.
- *   That is the same question {@link ProcessReaper} asks about an abandoned
- *   process group, and the same answer: a pid that is gone is gone.
+ * - An owner from **this host** is dead only when the signal-0 probe reports
+ *   `ESRCH`. Every other result preserves liveness.
  *
  * The residual risk is pid reuse. An owner whose pid was recycled by an
  * unrelated program reads as alive and its run waits for an operator, which is
@@ -75,24 +74,22 @@ const signalable = (send: (pid: number, signal: 0) => void, pid: number): boolea
  * A multi-process deployment with a supervisor or a lease system knows better
  * than any pid probe and should answer from that instead.
  *
- * **There is a second shipped implementation of this slot, and it disagrees.**
  * `@smthrs/run-store`'s `Ownership.sameHostPidProbe` fills the same
- * `LivenessCheck` and answers the OPPOSITE question on two inputs:
+ * `LivenessCheck`. Both probes use the same `ESRCH`-only death rule.
+ * `EPERM`, `EINVAL`, and unknown signal errors preserve liveness.
  *
- * - an owner on a DIFFERENT `hostId`. `sameHostPidProbe` returns `false`, so the
- *   run is reclaimable; this returns `true`, so a permanently dead foreign
- *   host's runs are stranded until an operator intervenes.
- * - a signal error that is neither `ESRCH` nor `EPERM`. `sameHostPidProbe`
- *   returns `code === "EPERM"`, so that error reads as DEAD; this returns
- *   `code !== "ESRCH"`, so the same error reads as ALIVE.
+ * The cross-host policy differs. `sameHostPidProbe` compares the owner's
+ * `hostId` with `context.claimant.hostId` and returns `false` for a foreign
+ * host, leaving the expired lease to govern reclaiming the run. This probe
+ * compares with the configured `hostId` and returns `true` for a foreign
+ * host, so a permanently dead foreign host's runs wait for an operator.
  *
  * Which answer a deployment gets depends on the entry point it used:
  * `@smthrs/flows`' `NodeRuntime` defaults to this function, while
- * `@smthrs/cli`'s `NodeControl` passes `sameHostPidProbe`. This function also
- * returns a ONE-argument function, which is structurally accepted as an
- * `Ownership.LivenessCheck` and silently discards the `context` argument the
- * sibling reads. Reconciling the two is open work, tracked as B-09 in
- * `docs/pages/release/support-matrix.md`.
+ * `@smthrs/cli`'s `NodeControl` passes `sameHostPidProbe`. This function
+ * returns a one-argument function, which is structurally accepted as an
+ * `Ownership.LivenessCheck` and ignores its `context` argument. Pick the
+ * probe for its cross-host policy and source of host identity.
  *
  * @category constructors
  * @since 0.1.0

@@ -56,6 +56,13 @@ describe("HostLiveness.isAlive", () => {
       expect(yield* isAlive({ hostId: "engine", pid: 1 })).toBe(true)
     }))
 
+  it.effect("treats an unknown signal error as a live owner", () =>
+    Effect.gen(function*() {
+      const isAlive = HostLiveness.isAlive({ hostId: "engine", signal: throwing("EINVAL") })
+
+      expect(yield* isAlive({ hostId: "engine", pid: 1 })).toBe(true)
+    }))
+
   it.effect("reads a missing-process error as a dead owner", () =>
     Effect.gen(function*() {
       const isAlive = HostLiveness.isAlive({ hostId: "engine", signal: throwing("ESRCH") })

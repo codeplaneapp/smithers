@@ -185,6 +185,7 @@ describe("sameHostPidProbe", () => {
         { name: "ESRCH", thrown: { code: "ESRCH" }, alive: false },
         { name: "EPERM", thrown: { code: "EPERM" }, alive: true },
         { name: "EACCES", thrown: { code: "EACCES" }, alive: true },
+        { name: "EINVAL", thrown: { code: "EINVAL" }, alive: true },
         { name: "unrecognized throw", thrown: "boom", alive: true }
       ] as const
 
