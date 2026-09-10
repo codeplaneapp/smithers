@@ -8,9 +8,9 @@ JJ change IDs where known, intent, predicted reads/writes, and planned fast, slo
 and delivery checks. These are predictions, not execution or passing-check claims.
 The ordinary turn narrative and recorded debugger detail remain in the same card.
 
-The current shell owns conversation visibility: Command-K / Control-K opens it,
-Escape dismisses it, and chat is hidden by default. See `../ONBOARDING.md`.
-This change does not introduce another dashboard or change the shell's policy.
+The current shell opens full-screen content. Command-K / Control-K opens only
+the bottom composer dock; Escape dismisses the dock. Chat history and embedded
+run cards occupy the workspace above it. See `../ONBOARDING.md`.
 
 ## Existing app API extension: structured flow input
 
@@ -55,32 +55,47 @@ is not the name to pass to `flow.run`.
 /runs.coding.select RUN_ID CHANGE_ID
 ```
 
-The typed input is `{runId: string, changeId: string}`. Slash, button and agent
+The typed input is `{runId: string, changeId: string, sourceCard?: string}`. Slash, button and agent
 doors use the same actor-tagged dispatcher. Selecting the current Change again
 collapses it. A missing Change or run is refused; missing input uses the existing
 schema-derived form. Native button semantics provide Tab, Enter and Space
 operation with a visible focus outline.
 
-The only new persisted presentation field is optional
-`run-trace.payload.codingChangeId`. The plan itself remains in the existing
-recorded `input.plan`; reopening a known run retains that original launch input
-and selection. The renderer imports the recipe's actual Effect `Plan` schema and
-validation function. It does not copy the contract into another Zod schema or
-create a plan table. Missing or invalid recorded input produces no invented plan.
+The optional persisted presentation field is `run-trace.payload.codingChangeId`.
+Manual runs retain their recorded `input.plan`; prompt-based requests derive the
+latest validated `Plan` value from an actual completed `coding/PreparePlan` or
+`coding/PrepareWithWiki` child, even while implementation is still running.
+Selection and reload use the same card state and native journal. The renderer
+imports the recipe's actual Effect `Plan` schema and validation function. There
+is no separate plan table or copied contract. Missing, malformed, foreign or
+ambiguous native evidence supplies no invented plan.
 
 ## Evidence boundary
 
-At this stage, the outline describes the recorded launch input only. It does
-not claim that the native workspace has been mutated, that a check has passed,
-or that a Change is vibed or shipped. Planned null atomic IDs remain unassigned;
-the UI does not mint substitute change identities.
+The host projects recorded native engine events into the existing control
+journal. The card folds those records with the native codecs, checks recorded
+child ownership and current execution generations, and respects its historical
+cursor. A later prepared plan replaces the earlier one only after that child's
+successful result is recorded; scrubbing backward cannot expose future plans.
+Predicted reads, writes, atoms and checks remain predictions. Planned null atomic
+IDs remain unassigned; the UI does not mint substitute change identities.
 
-The existing gateway reads the control journal, while durable engine records
-currently live in the engine journal. Host composition must expose actual
-recorded implementation/check evidence before this view can show those outcomes.
-No agent turns, receipt statuses, or synthetic engine events are manufactured by
-the browser. Native coding operations remain in the durable host. The workspace
-reporter's `@` is not treated as a complete mythical-history mirror.
+Actual `coding/CorrectPlan` output, or its enclosing `coding/Request` result,
+supplies the separate domain outcome: validated, changes requested or blocked.
+An engine-completed parent alone is not validation. A failed implementation
+child can be intentional early feedback while its parent continues owner repair.
+Recorded blocked child IDs link through the existing recursive trace and retain
+their source card's workspace binding. Raw native results and receipts stay
+available in debugger detail; none of these states imply vibed or shipped.
+
+A completed owned `coding/Poc` child supplies the retained disposable prototype.
+Its decoded result must name the exact source in its recorded input. The card
+shows a short finding and disclosable complete before/after source as escaped
+text, never executing retained HTML. Trace selection, keyboard-accessible source
+scrolling and the existing actor-tagged `runs.steer` form provide inspection and
+feedback. A queued feedback receipt does not itself prove a revised plan. No
+agent turns, receipt statuses or synthetic execution events are manufactured by
+the browser; the workspace reporter's `@` is not a complete history mirror.
 
 ## Design references and validation
 
@@ -90,13 +105,13 @@ navigation. Here the compact Change list retains that context while one selected
 Change exposes its predicted atoms and file ownership. The card's existing
 turn/timeline inspection supplies recorded execution detail separately.
 
-Focused tests cover typed launch and JSON form correction, native plan-schema
-validation, actor-tagged selection, reload/reopen retention, and absence of
-invented outcomes. The Chromium test opens Command-K, launches a synthetic plan
-through the real flow/controller path, traverses controls with Tab, expands and
-collapses with Enter/Space, restores state after reload, and maximizes the same
-component. The backend is a fixture in that browser test; it is not a live coding
-canary.
+Focused tests cover typed launch and JSON form correction, actual recorded host
+plan/POC results, cursor and generation boundaries, ambiguous ancestry refusal,
+domain outcomes, actor-tagged selection and reload retention. Chromium tests
+exercise the real flow/controller with retained native host evidence and separate
+synthetic layout fixtures: Command-K, Tab, Enter/Space, source scrolling, feedback
+submission, reload and maximization. The browser fixture is not a live coding
+canary; the retained producer records came from the native host acceptance run.
 
 Browser rendering is optimistic. The reload checks wait for the existing verbose
 command-settlement trace before reloading OPFS; reloading an in-flight write can
