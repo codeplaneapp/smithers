@@ -48,15 +48,23 @@ export const headSlice = (text: string, limit: number): string => {
  * @private
  */
 export const tailSlice = (text: string, limit: number): string => {
-  const characters = [...text]
+  let start = text.length
   let used = 0
-  let units = 0
-  for (let index = characters.length - 1; index >= 0; index--) {
-    const character = characters[index]!
-    const next = used + size(character)
+  // Inspect only the suffix: a large print must not allocate an array for
+  // the discarded prefix or a TextEncoder buffer for each retained character.
+  while (start > 0) {
+    const last = text.charCodeAt(start - 1)
+    let units = 1
+    if (last >= 0xdc00 && last <= 0xdfff && start > 1) {
+      const previous = text.charCodeAt(start - 2)
+      if (previous >= 0xd800 && previous <= 0xdbff) units = 2
+    }
+    // Lone surrogates use three UTF-8 bytes, like TextEncoder's replacement.
+    const width = units === 2 ? 4 : last < 0x80 ? 1 : last < 0x800 ? 2 : 3
+    const next = used + width
     if (next > limit) break
     used = next
-    units = units + character.length
+    start = start - units
   }
-  return text.slice(text.length - units)
+  return text.slice(start)
 }
