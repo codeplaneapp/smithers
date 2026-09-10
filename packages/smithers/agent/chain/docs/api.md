@@ -364,6 +364,8 @@ mocked at this boundary, not at the provider wire.
   call's payload into its context lines. Scripts call the author entry with
   `{ context: [...] }`; anything else normalizes to no context, so a script
   passing garbage stays a journaled observation, never a crash.
+  Context elements use string coercion. If coercion fails, they use JSON
+  text, or `[unprintable context]` if serialization also fails.
 - `make(implementation: Service): Service`: builds a seat from an
   implementation.
 - `makeNoop(overrides?: Partial<Service>): Service`: a seat whose every

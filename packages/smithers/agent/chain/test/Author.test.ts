@@ -1,6 +1,28 @@
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Author from "../src/Author.ts"
+import * as QuickJsRunner from "../src/QuickJsRunner.ts"
+import * as ScriptRunner from "../src/ScriptRunner.ts"
+import { flow, runChain } from "./harness.ts"
+
+const jsonContext: ReadonlyArray<unknown> = [
+  { toString: null },
+  { toString: 1 },
+  { toString: "x" },
+  { toString: {} },
+  { toString: null, nested: { toString: null } },
+  [{ toString: null }],
+  { nested: { toString: null } }
+]
+const normalizedContext = [
+  "{\"toString\":null}",
+  "{\"toString\":1}",
+  "{\"toString\":\"x\"}",
+  "{\"toString\":{}}",
+  "{\"toString\":null,\"nested\":{\"toString\":null}}",
+  "[{\"toString\":null}]",
+  "[object Object]"
+]
 
 const authorWith = (layer: ReturnType<typeof Author.layerMock>, input: Author.Input) =>
   Effect.runPromise(
@@ -62,5 +84,53 @@ describe("Author", () => {
     expect(Author.contextOf({ other: 1 })).toEqual([])
     expect(Author.contextOf(null)).toEqual([])
     expect(Author.contextOf("garbage")).toEqual([])
+  })
+
+  it.each(jsonContext.map((part, index) => [part, normalizedContext[index]] as const))(
+    "normalizes JSON context with shadowed toString: %j",
+    (part, expected) => {
+      expect(Author.contextOf(JSON.parse(JSON.stringify({ context: [part] })))).toEqual([expected])
+    }
+  )
+
+  it.each(
+    [
+      ["in-process", ScriptRunner.layerInProcess],
+      ["quickjs", QuickJsRunner.layer()]
+    ] as const
+  )("settles and replays JSON author context through %s", async (_name, runner) => {
+    const seen: Array<Author.Input> = []
+    const first = await runChain({
+      runner,
+      author: Author.layerFn((input) => {
+        seen.push(input)
+        return seen.length === 1
+          ? flow(
+            `const next = await ctx.call("author", ${JSON.stringify({ context: jsonContext })})`,
+            `return to(next)`
+          )
+          : flow(`return done("recovered")`)
+      })
+    })
+    expect(first.outcome).toEqual({ _tag: "Done", value: "recovered" })
+    expect(seen).toHaveLength(2)
+    expect(seen[1]?.context).toEqual(normalizedContext)
+    expect(first.events.filter((event) => event._tag === "CallSettled" && event.name === "author"))
+      .toHaveLength(2)
+
+    const replay = await runChain({
+      runner,
+      author: Author.layerMock([]),
+      initial: first.events
+    })
+    expect(replay).toEqual(first)
+  })
+
+  it("uses a placeholder when both coercion and JSON serialization fail", () => {
+    const circular = { toString: null, nested: {} }
+    circular.nested = circular
+    expect(Author.contextOf({ context: [circular] })).toEqual(["[unprintable context]"])
+    expect(Author.contextOf({ context: [{ toString: null, toJSON: () => undefined }] }))
+      .toEqual(["[unprintable context]"])
   })
 })

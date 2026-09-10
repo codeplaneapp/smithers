@@ -48,6 +48,8 @@ export interface Input {
  * the author entry with `{ context: [...] }`, and anything else — a script
  * passing garbage stays a journaled observation, never a crash — normalizes
  * to no context.
+ * Context elements use string coercion, falling back to JSON text when
+ * coercion fails, or `[unprintable context]` if serialization also fails.
  *
  * @category constructors
  * @since 0.1.0
@@ -56,7 +58,19 @@ export interface Input {
 export const contextOf = (payload: unknown): ReadonlyArray<string> => {
   if (typeof payload === "object" && payload !== null && "context" in payload) {
     const context = (payload as { readonly context: unknown }).context
-    if (Array.isArray(context)) return context.map((part) => String(part))
+    if (Array.isArray(context)) {
+      return context.map((part) => {
+        try {
+          return String(part)
+        } catch {
+          try {
+            return JSON.stringify(part) ?? "[unprintable context]"
+          } catch {
+            return "[unprintable context]"
+          }
+        }
+      })
+    }
   }
   return []
 }
