@@ -221,17 +221,20 @@ interface Sink {
 const retires = (eventType: string): boolean =>
   eventType === ExitedEventType || eventType === ReapedEventType || eventType === SkippedEventType
 
+/** A pid may be reused before the previous process's scope releases its record. */
+const identity = (record: ProcessRecord): string => `${record.pid}:${record.startedAtMs}`
+
 /** One page's worth of history folded onto the live set. */
-const apply = (live: Map<number, ProcessRecord>, entry: JournalEvent.Entry): void => {
+const apply = (live: Map<string, ProcessRecord>, entry: JournalEvent.Entry): void => {
   if (entry.sourceId !== sourceId) return
   const decoded = decodeRecord(entry.payload)
   if (decoded._tag === "Failure") return
   if (entry.eventType === SpawnedEventType) {
-    live.set(decoded.success.pid, decoded.success)
+    live.set(identity(decoded.success), decoded.success)
     return
   }
   if (retires(entry.eventType)) {
-    live.delete(decoded.success.pid)
+    live.delete(identity(decoded.success))
   }
 }
 
@@ -256,7 +259,7 @@ const journalSink = (options: Options, journal: JournalModule.Service): Sink => 
       Effect.asVoid
     ),
   replay: Effect.gen(function*() {
-    const live = new Map<number, ProcessRecord>()
+    const live = new Map<string, ProcessRecord>()
     let after: JournalEvent.Seq | undefined
     for (;;) {
       const page = yield* journal.entries({
@@ -283,7 +286,7 @@ const memorySink: Sink = {
 }
 
 const makeWith = (options: Options, sink: Sink): Service => {
-  const live = new Map<number, ProcessRecord>()
+  const live = new Map<string, ProcessRecord>()
   return ProcessLedger.of({
     record: (spawned) =>
       Effect.gen(function*() {
@@ -296,18 +299,18 @@ const makeWith = (options: Options, sink: Sink): Service => {
           startedAtMs,
           commandDigest: spawned.commandDigest
         }
-        live.set(record.pid, record)
+        live.set(identity(record), record)
         // A failed append tells the caller the spawn was not recorded, and the
         // caller kills the child. Keeping it live would lie to every later
         // reader about a process this incarnation still holds.
         yield* sink.append(SpawnedEventType, record).pipe(
-          Effect.tapCause(() => Effect.sync(() => live.delete(record.pid)))
+          Effect.tapCause(() => Effect.sync(() => live.delete(identity(record))))
         )
         return record
       }),
     release: (record) =>
       Effect.suspend(() => {
-        live.delete(record.pid)
+        live.delete(identity(record))
         return sink.append(ExitedEventType, record)
       }),
     reaped: (record) => sink.append(ReapedEventType, record),

@@ -5,6 +5,7 @@ import * as JournalEvent from "@smthrs/journal/JournalEvent"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import { Effect } from "effect"
 import type * as Scope from "effect/Scope"
+import { TestClock } from "effect/testing"
 import * as ProcessLedger from "../src/ProcessLedger.ts"
 
 const run = <A, E>(effect: Effect.Effect<A, E, Journal | Scope.Scope>) =>
@@ -45,17 +46,26 @@ describe("ProcessLedger", () => {
     run(
       Effect.gen(function*() {
         const ledger = yield* ProcessLedger.make({ hostId: "host-a", ownerPid: 4242 })
+        const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
         const spawned = yield* ledger.record({ pid: 91, pgid: 91, commandDigest: "sleep 60" })
 
         expect(spawned.hostId).toBe("host-a")
         expect(spawned.ownerPid).toBe(4242)
-        expect(spawned.startedAtMs).toBeGreaterThanOrEqual(0)
+        expect(spawned.startedAtMs).toBe(now)
         expect(yield* ledger.live).toEqual([spawned])
+
+        yield* TestClock.adjust("5 seconds")
+        const later = yield* ledger.record({ pid: 92, pgid: 92, commandDigest: "sleep 60" })
+        expect(later.startedAtMs).toBe(now + 5_000)
 
         const journal = yield* Journal
         const page = yield* journal.entries({ runId: ProcessLedger.hostRunId("host-a"), limit: 16 })
-        expect(page.entries.map((row) => row.eventType)).toEqual(["flows.host.process-spawned.v1"])
+        expect(page.entries.map((row) => row.eventType)).toEqual([
+          "flows.host.process-spawned.v1",
+          "flows.host.process-spawned.v1"
+        ])
         expect(page.entries[0]?.payload).toMatchObject({ pid: 91, pgid: 91, commandDigest: "sleep 60" })
+        expect(page.entries.map((row) => row.payload)).toEqual([spawned, later])
       })
     ))
 
@@ -102,6 +112,40 @@ describe("ProcessLedger", () => {
         expect((yield* third.orphans).map((row) => row.pid)).toEqual([13])
       })
     ))
+
+  it.effect("keeps a reused pid live when an older process is released again", () =>
+    Effect.gen(function*() {
+      const ledger = yield* ProcessLedger.makeMemory({ hostId: "host-a", ownerPid: 100 })
+      const first = yield* ledger.record({ pid: 11, pgid: 11, commandDigest: "sleep" })
+      yield* TestClock.adjust("5 seconds")
+      const second = yield* ledger.record({ pid: 11, pgid: 11, commandDigest: "sleep" })
+
+      yield* ledger.release(first)
+      expect(yield* ledger.live).toEqual([second])
+      yield* ledger.release(first)
+      expect(yield* ledger.live).toEqual([second])
+      yield* ledger.release(second)
+      expect(yield* ledger.live).toEqual([])
+    }))
+
+  for (const retirement of ["release", "reaped", "skipped"] as const) {
+    it.effect(`keeps a reused pid orphaned after a delayed ${retirement} of its predecessor`, () =>
+      run(
+        Effect.gen(function*() {
+          const ledger = yield* ProcessLedger.make({ hostId: "host-a", ownerPid: 100 })
+          const first = yield* ledger.record({ pid: 11, pgid: 11, commandDigest: "sleep" })
+          yield* TestClock.adjust("5 seconds")
+          const second = yield* ledger.record({ pid: 11, pgid: 11, commandDigest: "sleep" })
+          yield* ledger[retirement](first, "identity-mismatch")
+
+          const next = yield* ProcessLedger.make({ hostId: "host-a", ownerPid: 200 })
+          expect(yield* next.orphans).toEqual([second])
+          if (retirement === "release") expect(yield* ledger.live).toEqual([second])
+          yield* next.reaped(second)
+          expect(yield* next.orphans).toEqual([])
+        })
+      ))
+  }
 
   it.effect("ignores journal entries written by another producer or about another subject", () =>
     run(
