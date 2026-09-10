@@ -72,7 +72,9 @@ export const layerAt = (options: NativeOptions) => Layer.effect(Jj.Jj)(Effect.ge
     Effect.catchCause(cause => {
       if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
       const error = Cause.squash(cause)
-      return Effect.fail(Jj.isJjError(error) ? error : failure(method, "unknown", "Native snapshot process failed", error))
+      const detail = error instanceof Error && error.cause !== undefined ? error.cause : error
+      return Effect.fail(Jj.isJjError(error) ? error : failure(method, "unknown",
+        "Native snapshot process failed: " + Jj.jjErrorCause(detail).message, detail))
     })
   )
   const exact = (method: Method, value: string) => Schema.decodeUnknownEffect(CommitId)(value).pipe(
