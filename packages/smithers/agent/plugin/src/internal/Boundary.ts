@@ -124,11 +124,45 @@ const boundedPath = (path: string): string => {
   return path
 }
 
+interface Totals {
+  bytes: number
+  members: number
+  nodes: number
+  depth: number
+}
+
+interface Entry {
+  readonly keyBytes: number
+  readonly totals: Totals
+}
+
+interface Snapshot {
+  readonly totals: Totals
+  readonly entries: Map<string, Entry>
+}
+
+// Only detached containers constructed here enter this map. Mutable caller
+// objects and Object.freeze alone never establish admission.
+const snapshots = new WeakMap<object, Snapshot>()
+
+const scalarTotals = (bytes: number): Totals => ({ bytes, members: 0, nodes: 1, depth: 0 })
+
+const total = (entries: ReadonlyMap<string, Entry>): Totals => {
+  const totals: Totals = { bytes: 2 + Math.max(0, entries.size - 1), members: entries.size, nodes: 1, depth: 1 }
+  for (const entry of entries.values()) {
+    totals.bytes += entry.keyBytes + entry.totals.bytes
+    totals.members += entry.totals.members
+    totals.nodes += entry.totals.nodes
+    totals.depth = Math.max(totals.depth, 1 + entry.totals.depth)
+  }
+  return totals
+}
+
 interface Frame {
   readonly input: unknown
   readonly path: string
   readonly depth: number
-  readonly assign: (value: Json) => void
+  readonly assign: (value: Json, totals: Totals) => void
 }
 
 /**
@@ -167,20 +201,21 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
       if (value === null) {
         const exceeded = addBytes(4, frame.path)
         if (exceeded) return exceeded
-        frame.assign(null)
+        frame.assign(null, scalarTotals(4))
         continue
       }
       if (typeof value === "boolean") {
         const exceeded = addBytes(value ? 4 : 5, frame.path)
         if (exceeded) return exceeded
-        frame.assign(value)
+        frame.assign(value, scalarTotals(value ? 4 : 5))
         continue
       }
       if (typeof value === "number") {
         if (!Number.isFinite(value)) return fail(frame.path, "must be a finite JSON number")
-        const exceeded = addBytes(encoder.encode(JSON.stringify(value)).byteLength, frame.path)
+        const numberBytes = encoder.encode(JSON.stringify(value)).byteLength
+        const exceeded = addBytes(numberBytes, frame.path)
         if (exceeded) return exceeded
-        frame.assign(value)
+        frame.assign(value, scalarTotals(numberBytes))
         continue
       }
       if (typeof value === "string") {
@@ -195,7 +230,7 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
         }
         const exceeded = addBytes(stringBytes, frame.path)
         if (exceeded) return exceeded
-        frame.assign(value)
+        frame.assign(value, scalarTotals(stringBytes))
         continue
       }
       if (typeof value !== "object") return fail(frame.path, "must contain only JSON values")
@@ -215,7 +250,9 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
           return fail(frame.path, "must be a dense array with no extra properties")
         }
         const output: Array<Json> = new Array(length)
-        frame.assign(output)
+        const metadata: Snapshot = { totals: scalarTotals(0), entries: new Map() }
+        snapshots.set(output, metadata)
+        frame.assign(output, metadata.totals)
         containers.push(output)
         const exceeded = addBytes(2 + Math.max(0, length - 1), frame.path)
         if (exceeded) return exceeded
@@ -228,7 +265,10 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
             input: descriptor.value,
             path: `${frame.path}[${index}]`,
             depth: frame.depth + 1,
-            assign: (item) => output[index] = item
+            assign: (item, totals) => {
+              output[index] = item
+              metadata.entries.set(String(index), { keyBytes: 0, totals })
+            }
           })
         }
         continue
@@ -242,10 +282,14 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
       members += stringKeys.length
       if (members > limits.maxMembers) return fail(frame.path, `exceeds the ${limits.maxMembers}-member limit`)
       const output: Record<string, Json> = {}
-      frame.assign(output)
+      const metadata: Snapshot = { totals: scalarTotals(0), entries: new Map() }
+      snapshots.set(output, metadata)
+      frame.assign(output, metadata.totals)
       containers.push(output)
       let structuralBytes = 2 + Math.max(0, stringKeys.length - 1)
-      const children: Array<{ readonly key: string; readonly value: unknown; readonly path: string }> = []
+      const children: Array<
+        { readonly key: string; readonly keyBytes: number; readonly value: unknown; readonly path: string }
+      > = []
       for (let index = 0; index < stringKeys.length; index++) {
         const key = stringKeys[index]!
         if (key.length > limits.maxKeyBytes) {
@@ -263,7 +307,7 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
         if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
           return fail(path, "must be an enumerable data property")
         }
-        children.push({ key, value: descriptor.value, path })
+        children.push({ key, keyBytes: keyBytes + 1, value: descriptor.value, path })
       }
       for (let index = children.length - 1; index >= 0; index--) {
         const child = children[index]!
@@ -271,20 +315,27 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
           input: child.value,
           path: child.path,
           depth: frame.depth + 1,
-          assign: (item) =>
+          assign: (item, totals) => {
+            metadata.entries.set(child.key, { keyBytes: child.keyBytes, totals })
             Object.defineProperty(output, child.key, {
               value: item,
               enumerable: true,
               configurable: true,
               writable: true
             })
+          }
         })
       }
       const exceeded = addBytes(structuralBytes, frame.path)
       if (exceeded) return exceeded
     }
 
-    for (let index = containers.length - 1; index >= 0; index--) Object.freeze(containers[index])
+    for (let index = containers.length - 1; index >= 0; index--) {
+      const container = containers[index]!
+      const metadata = snapshots.get(container)!
+      Object.assign(metadata.totals, total(metadata.entries))
+      Object.freeze(container)
+    }
     return { ok: true, value: root }
   } catch {
     return fail(activePath, "could not be inspected without executing user code")
@@ -305,4 +356,64 @@ export const record = (
   return admitted.ok && (admitted.value === null || Array.isArray(admitted.value) || typeof admitted.value !== "object")
     ? { ok: false, path: "$", complaint: "must be a JSON record" }
     : admitted
+}
+
+/**
+ * Merges two independently admitted records, retaining unchanged subtrees.
+ * Both operands must come from successful admission, and the patch must be a
+ * fresh copy: their trees must be disjoint. Each output branch then comes from
+ * at most one location in either tree, preserving the no-repeated-reference
+ * invariant without walking retained subtrees. Limits apply to the result.
+ *
+ * @private
+ * @since 1.0.0-rc.0
+ */
+export const mergeRecords = (
+  base: { readonly [key: string]: Json },
+  patch: { readonly [key: string]: Json },
+  limits: Limits = defaultLimits
+): Admission => {
+  const merge = (
+    left: { readonly [key: string]: Json },
+    right: { readonly [key: string]: Json },
+    path: string
+  ): Admission => {
+    const entries = new Map(snapshots.get(left)!.entries)
+    const result = { ...left }
+    for (const [key, entry] of snapshots.get(right)!.entries) {
+      const previous = left[key]
+      const next = right[key]!
+      if (
+        typeof previous === "object" && previous !== null && !Array.isArray(previous) &&
+        typeof next === "object" && next !== null && !Array.isArray(next)
+      ) {
+        const merged = merge(
+          previous as { readonly [key: string]: Json },
+          next as { readonly [key: string]: Json },
+          childPath(path, key)
+        )
+        if (!merged.ok) return merged
+        result[key] = merged.value
+        entries.set(key, { keyBytes: entry.keyBytes, totals: snapshots.get(merged.value as object)!.totals })
+      } else {
+        result[key] = next
+        entries.set(key, entry)
+      }
+    }
+    const totals = total(entries)
+    const complaint = totals.members > limits.maxMembers ?
+      `exceeds the ${limits.maxMembers}-member limit`
+      : totals.nodes > limits.maxNodes ?
+      `exceeds the ${limits.maxNodes}-node limit`
+      : totals.bytes > limits.maxBytes ?
+      `exceeds the ${limits.maxBytes}-byte limit`
+      : totals.depth > limits.maxDepth ?
+      `exceeds the depth limit of ${limits.maxDepth}`
+      : undefined
+    if (complaint !== undefined) return { ok: false, path: boundedPath(path), complaint }
+    Object.freeze(result)
+    snapshots.set(result, { totals, entries })
+    return { ok: true, value: result }
+  }
+  return merge(base, patch, "$")
 }

@@ -8,9 +8,10 @@
  *
  * @since 1.0.0-rc.0
  */
-import { isRecord } from "@smthrs/canonical/Record"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
+import * as SchemaIssue from "effect/SchemaIssue"
 import * as Boundary from "./internal/Boundary.ts"
 import { PluginError } from "./PluginError.ts"
 
@@ -62,8 +63,30 @@ export const ConfigValue = Schema.Json
  */
 export type ConfigValue = typeof ConfigValue.Type
 
+const admittedConfigs = new WeakSet<object>()
+
+const configurationSchema = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    Schema.declare<Readonly<Record<string, ConfigValue>>>((value): value is Readonly<Record<string, ConfigValue>> =>
+      typeof value === "object" && value !== null && admittedConfigs.has(value)
+    ),
+    {
+      decode: SchemaGetter.transformOrFail((value) =>
+        Effect.try({
+          try: () => snapshotRecord(value),
+          catch: (cause) => {
+            const error = cause as PluginError
+            return new SchemaIssue.InvalidValue({ message: `${error.path}: ${error.message}` })
+          }
+        })
+      ),
+      encode: SchemaGetter.transform((value) => value)
+    }
+  )
+)
+
 /**
- * The pre-resolution configuration an application assembles.
+ * Admits pre-resolution configuration as a detached, recursively frozen snapshot.
  *
  * Keys name plugin-owned namespaces. `engine`, `retry`, `store`, and
  * `plugins` are refused because accepting those names would imply policy the
@@ -72,7 +95,7 @@ export type ConfigValue = typeof ConfigValue.Type
  * @category models
  * @since 1.0.0-rc.0
  */
-export const FlowsConfig = Schema.Record(Schema.String, ConfigValue)
+export const FlowsConfig = configurationSchema
 
 /**
  * The decoded form of {@link FlowsConfig}.
@@ -83,12 +106,12 @@ export const FlowsConfig = Schema.Record(Schema.String, ConfigValue)
 export type FlowsConfig = typeof FlowsConfig.Type
 
 /**
- * The detached, recursively frozen configuration handed to plugins.
+ * Admits the detached, recursively frozen configuration handed to plugins.
  *
  * @category models
  * @since 1.0.0-rc.0
  */
-export const ResolvedConfig = Schema.Record(Schema.String, ConfigValue)
+export const ResolvedConfig = configurationSchema
 
 /**
  * The decoded form of {@link ResolvedConfig}.
@@ -97,14 +120,6 @@ export const ResolvedConfig = Schema.Record(Schema.String, ConfigValue)
  * @since 1.0.0-rc.0
  */
 export type ResolvedConfig = typeof ResolvedConfig.Type
-
-/**
- * Empty defaults. Engine policy is deliberately not defaulted here.
- *
- * @category constructors
- * @since 1.0.0-rc.0
- */
-export const defaults: ResolvedConfig = Object.freeze({})
 
 const reservedRootKeys = new Set(["engine", "retry", "store", "plugins"])
 
@@ -115,7 +130,8 @@ const invalid = (path: string, complaint: string): PluginError =>
     path
   })
 
-const snapshotRecord = (input: unknown): ResolvedConfig => {
+const snapshotRecord = (input: unknown, reuse = true): Readonly<Record<string, ConfigValue>> => {
+  if (reuse && typeof input === "object" && input !== null && admittedConfigs.has(input)) return input as ResolvedConfig
   const admitted = Boundary.record(input)
   if (!admitted.ok) throw invalid(admitted.path, admitted.complaint)
   const record = admitted.value as Readonly<Record<string, ConfigValue>>
@@ -124,41 +140,24 @@ const snapshotRecord = (input: unknown): ResolvedConfig => {
       throw invalid(`$.${key}`, "uses a runtime-policy key that the plugin kernel does not own")
     }
   }
+  admittedConfigs.add(record)
   return record
 }
 
-const define = (target: Record<string, ConfigValue>, key: string, value: ConfigValue): void => {
-  Object.defineProperty(target, key, {
-    value,
-    enumerable: true,
-    configurable: true,
-    writable: true
-  })
-}
-
-const mergeRecords = (
-  base: Readonly<Record<string, ConfigValue>>,
-  patch: Readonly<Record<string, ConfigValue>>
-): Readonly<Record<string, ConfigValue>> => {
-  const result: Record<string, ConfigValue> = {}
-  for (const key of Object.keys(base)) define(result, key, base[key]!)
-  for (const key of Object.keys(patch)) {
-    const previous = result[key]
-    const next = patch[key]!
-    define(
-      result,
-      key,
-      previous !== undefined && isRecord(previous) && isRecord(next) ? mergeRecords(previous, next) : next
-    )
-  }
-  return Object.freeze(result)
-}
+/**
+ * Empty defaults. Engine policy is deliberately not defaulted here.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const defaults: ResolvedConfig = snapshotRecord({})
 
 /**
  * Copies and deep-merges a configuration patch over a base configuration.
  *
  * Records merge key-by-key and every other JSON value replaces wholesale.
- * Both operands and the merged output are admitted, so unsafe property names,
+ * Raw operands are admitted; known snapshots retain unchanged subtrees.
+ * Cached subtree totals enforce merged output bounds. Unsafe property names,
  * accessors, cycles, exotic prototypes, and aggregate values outside the
  * resource limits fail with `config_invalid`.
  *
@@ -168,8 +167,13 @@ const mergeRecords = (
 export const merge = (base: FlowsConfig, patch: unknown): FlowsConfig => {
   const safeBase = snapshotRecord(base)
   if (patch === undefined) return safeBase
-  const safePatch = snapshotRecord(patch)
-  return snapshotRecord(mergeRecords(safeBase, safePatch))
+  // Even a known patch is copied so its tree cannot alias the retained base.
+  const safePatch = snapshotRecord(patch, false)
+  const merged = Boundary.mergeRecords(safeBase, safePatch)
+  if (!merged.ok) throw invalid(merged.path, merged.complaint)
+  const record = merged.value as ResolvedConfig
+  admittedConfigs.add(record)
+  return record
 }
 
 /**

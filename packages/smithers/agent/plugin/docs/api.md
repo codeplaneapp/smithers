@@ -330,10 +330,10 @@ and hook names are control-free, well-formed strings within
 const ConfigValue: Schema.Json
 type ConfigValue = typeof ConfigValue.Type
 
-const FlowsConfig: Schema.Record$<Schema.String, typeof ConfigValue>
+const FlowsConfig: Schema.Codec<Readonly<Record<string, ConfigValue>>, unknown>
 type FlowsConfig = typeof FlowsConfig.Type
 
-const ResolvedConfig: Schema.Record$<Schema.String, typeof ConfigValue>
+const ResolvedConfig: typeof FlowsConfig
 type ResolvedConfig = typeof ResolvedConfig.Type
 
 const defaults: ResolvedConfig
@@ -344,13 +344,27 @@ const snapshot: (config: unknown) => Effect.Effect<FlowsConfig, PluginError>
 const resolve: (config: unknown) => Effect.Effect<ResolvedConfig, PluginError>
 ```
 
-| Export       | Behavior                                                                                                                                                                                                                                                           |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `defaults`   | The frozen empty configuration. Engine policy is deliberately not defaulted here.                                                                                                                                                                                  |
-| `merge`      | Copies and deep-merges a patch over a base. Records merge key by key; every other JSON value replaces wholesale. Both operands and the result are admitted, so a chain of small patches cannot exceed the bounds. Throws `PluginError` with code `config_invalid`. |
-| `deepFreeze` | Copies and recursively freezes one JSON value without retaining caller-owned objects. Throws `PluginError`.                                                                                                                                                        |
-| `snapshot`   | Admits a raw pre-resolution configuration as an immutable snapshot.                                                                                                                                                                                                |
-| `resolve`    | Decodes the post-waterfall configuration into its final immutable form.                                                                                                                                                                                            |
+| Export       | Behavior                                                                                                                                                                                                                                                                  |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaults`   | The frozen empty configuration. Engine policy is deliberately not defaulted here.                                                                                                                                                                                         |
+| `merge`      | Copies and deep-merges a patch over a base. Records merge key by key; every other JSON value replaces wholesale. Raw operands are admitted; unchanged snapshot subtrees are reused. Cached totals enforce result bounds. Throws `PluginError` with code `config_invalid`. |
+| `deepFreeze` | Copies and recursively freezes one JSON value without retaining caller-owned objects. Throws `PluginError`.                                                                                                                                                               |
+| `snapshot`   | Admits a raw pre-resolution configuration as an immutable snapshot.                                                                                                                                                                                                       |
+| `resolve`    | Decodes the post-waterfall configuration into its final immutable form.                                                                                                                                                                                                   |
+
+`FlowsConfig` and `ResolvedConfig` decode through the same admission contract as
+`snapshot` and `resolve`. Decoding raw input detaches and recursively freezes it;
+invalid input produces a schema error. `Schema.is` recognizes admitted snapshots,
+not mutable JSON shapes. Encoding accepts admitted snapshots and returns their
+JSON value. The TypeScript types remain read-only namespace maps.
+
+Known snapshots can be reused by `snapshot`, `resolve`, and `merge`. Freezing an
+object yourself does not establish admission. A merge copies each changed record
+and retains unchanged frozen subtrees. It fully admits and detaches patch data,
+including references to previous snapshots, so patches cannot introduce shared
+references. Cached byte, member, node, and depth totals enforce result bounds.
+Admission work scales with the initial tree plus patch data; copying changed
+records also scales with their immediate key counts.
 
 Configuration is a plugin-owned JSON namespace map. The root keys `engine`,
 `retry`, `store`, and `plugins` are refused, because the kernel does not apply

@@ -242,6 +242,30 @@ describe("the inert plugin JSON boundary", () => {
     expect(admit({ a: true }, { maxBytes: 10 })).toMatchObject({ ok: true })
   })
 
+  it("accounts for cached JSON bytes, members, nodes and container depth exactly", () => {
+    const snapshot = (input: unknown) => {
+      const result = Boundary.record(input)
+      if (!result.ok) throw new Error(result.complaint)
+      return result.value as { readonly [key: string]: Boundary.Json }
+    }
+    const left = snapshot({ kept: [null, true, false, -1.5, "é\n"], nested: { left: {} }, replace: { old: true } })
+    const right = snapshot({ nested: { right: ["😀"] }, replace: 0, added: { "\"": 1 } })
+    const expected = { ...left, nested: { left: {}, right: ["😀"] }, replace: 0, added: { "\"": 1 } }
+    const bytes = new TextEncoder().encode(JSON.stringify(expected)).byteLength
+    const exact = { ...Boundary.defaultLimits, maxBytes: bytes, maxMembers: 13, maxNodes: 14, maxDepth: 3 }
+    const merged = Boundary.mergeRecords(left, right, exact)
+    expect(merged).toEqual({ ok: true, value: expected })
+    for (const key of ["maxBytes", "maxMembers", "maxNodes", "maxDepth"] as const) {
+      const bounded = { ...exact, [key]: exact[key] - 1 }
+      expect(Boundary.admit(expected, bounded).ok).toBe(false)
+      expect(Boundary.mergeRecords(left, right, bounded).ok).toBe(false)
+    }
+    expect(Boundary.mergeRecords(snapshot({ nested: { a: 1 } }), snapshot({ nested: { b: 2 } }), {
+      ...Boundary.defaultLimits,
+      maxMembers: 1
+    })).toMatchObject({ ok: false, path: "$.nested" })
+  })
+
   it("admits only records through the record entry point", () => {
     expect(Boundary.record({ ok: true }, limits())).toMatchObject({ ok: true })
     for (const value of [null, false, 1, "x", []]) {

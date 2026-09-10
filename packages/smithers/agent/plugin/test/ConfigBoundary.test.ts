@@ -1,11 +1,145 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import * as Config from "../src/Config.ts"
+import * as Boundary from "../src/internal/Boundary.ts"
 import * as Kernel from "../src/Kernel.ts"
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.runPromise(effect as Effect.Effect<A, E>)
 
 describe("plugin configuration snapshots", () => {
+  it.each([Config.FlowsConfig, Config.ResolvedConfig])(
+    "schemas enforce admission and construct frozen snapshots",
+    (schema) => {
+      const source = { feature: { enabled: true } }
+      const decoded = Schema.decodeUnknownSync(schema)(source)
+      expect(decoded).not.toBe(source)
+      expect(decoded["feature"]).not.toBe(source.feature)
+      expect(Object.isFrozen(decoded)).toBe(true)
+      expect(Object.isFrozen(decoded["feature"])).toBe(true)
+      expect(Schema.encodeSync(schema)(decoded)).toBe(decoded)
+      expect(Schema.is(schema)(decoded)).toBe(true)
+      for (const raw of [source, Object.freeze({}), null, false]) expect(Schema.is(schema)(raw)).toBe(false)
+      for (
+        const input of [{ engine: { retry: 3 } }, { feature: undefined }, {
+          big: "x".repeat(Config.maximumConfigBytes)
+        }]
+      ) {
+        expect(() => Schema.decodeUnknownSync(schema)(input)).toThrow()
+      }
+    }
+  )
+
+  it("admits only patch data and retains unchanged frozen subtrees", async () => {
+    // 4,002 nodes: the aggregate member bound precludes a valid 10k-node tree.
+    const base = await run(Config.resolve({
+      extension: Object.fromEntries(
+        Array.from({ length: 2_000 }, (_, index) => [`key${index}`, { value: "x".repeat(240) }])
+      )
+    }))
+    const encode = vi.spyOn(TextEncoder.prototype, "encode")
+    const record = vi.spyOn(Boundary, "record")
+    const patch = { enabled: true }
+    let inputs: Array<unknown>
+    let merged: Config.FlowsConfig
+    let calls: number
+    try {
+      merged = Config.merge(base, patch)
+      calls = encode.mock.calls.length
+      inputs = record.mock.calls.map(([input]) => input)
+    } finally {
+      encode.mockRestore()
+      record.mockRestore()
+    }
+    expect(inputs).toEqual([patch])
+    expect(calls).toBeLessThanOrEqual(2)
+    expect(merged["extension"]).toBe(base["extension"])
+    expect(Object.isFrozen(merged)).toBe(true)
+    expect(await run(Config.resolve(merged))).toBe(merged)
+  })
+
+  it("uses the same descriptor-only refusal contract through both schemas", () => {
+    const getter = vi.fn(() => true)
+    const shared = { value: 1 }
+    const cycle: Record<string, unknown> = {}
+    cycle["self"] = cycle
+    for (const schema of [Config.FlowsConfig, Config.ResolvedConfig]) {
+      for (
+        const input of [
+          null,
+          [],
+          { value: Number.NaN },
+          { value: "\ud800" },
+          { a: shared, b: shared },
+          cycle,
+          Object.defineProperty({}, "secret", { get: getter, enumerable: true }),
+          JSON.parse("{\"extension\":{\"__proto__\":true}}"),
+          Object.fromEntries(Array.from({ length: Config.maximumConfigMembers + 1 }, (_, i) => [`key${i}`, 0]))
+        ]
+      ) expect(() => Schema.decodeUnknownSync(schema)(input)).toThrow()
+    }
+    expect(getter).not.toHaveBeenCalled()
+  })
+
+  it("keeps admission work linear in the initial config plus constant hook patches", async () => {
+    // Port of performance-1.ts: assert admission work instead of wall time.
+    const input = {
+      extension: Object.fromEntries(Array.from({ length: 2_048 }, (_, i) => [`key${i}`, "x".repeat(240)]))
+    }
+    const patches = Array.from({ length: 32 }, () => ({ enabled: true }))
+    const record = vi.spyOn(Boundary, "record")
+    let inputs: Array<unknown>
+    try {
+      const kernel = await run(Kernel.make(
+        patches.map((patch, i) => ({
+          name: `p${i}`,
+          hooks: { config: () => Effect.succeed(patch) }
+        })),
+        input
+      ))
+      expect(kernel.config["extension"]).toEqual(input.extension)
+      inputs = record.mock.calls.map(([value]) => value)
+    } finally {
+      record.mockRestore()
+    }
+    expect(inputs).toEqual([input, ...patches])
+  })
+
+  it("copies snapshot references in patches and still refuses repeated patch references", async () => {
+    const base = await run(Config.resolve({ stable: { inner: { value: 1 } }, list: [{ value: 2 }] }))
+    const patch = { moved: base["stable"], list: base["list"] }
+    const merged = Config.merge(base, patch)
+    expect(merged["stable"]).toBe(base["stable"])
+    expect(merged["moved"]).toEqual(base["stable"])
+    expect(merged["moved"]).not.toBe(base["stable"])
+    expect(merged["list"]).not.toBe(base["list"])
+    expect(Boundary.record(merged).ok).toBe(true)
+    expect(() => Config.merge(base, { first: base["stable"], second: base["stable"] })).toThrow(/repeated/)
+    expect(() => Config.merge({ first: base["stable"]!, second: base["stable"]! }, {})).toThrow(/repeated/)
+    const nested = await run(Config.resolve({ copy: { stable: { inner: { value: 1 } } } }))
+    expect(Boundary.record(Config.merge(base, nested)).ok).toBe(true)
+    expect(Boundary.record(Config.merge(base, base)).ok).toBe(true)
+    expect(Config.merge(base, undefined)).toBe(base)
+    expect(Config.merge(Config.defaults, {})).toEqual({})
+  })
+
+  it("rechecks promoted snapshot namespaces and never trusts caller freezing", async () => {
+    const base = await run(Config.resolve({ extension: { engine: { retry: 3 } } }))
+    expect(() => Config.merge(base["extension"] as Config.FlowsConfig, {})).toThrow(/runtime-policy/)
+    const input = Object.freeze({ nested: { enabled: true } })
+    const copy = Config.merge(input, {})
+    input.nested.enabled = false
+    expect(copy["nested"]).toEqual({ enabled: true })
+    expect(Object.isFrozen(copy["nested"])).toBe(true)
+  })
+
+  it("enforces the merged byte bound across cached arrays and record subtrees", async () => {
+    const base = await run(Config.resolve({ extension: Array.from({ length: 16 }, () => "x".repeat(65_000)) }))
+    expect(() => Config.merge(base, { extra: "x".repeat(10_000) })).toThrow(/byte limit/)
+    const replaced = Config.merge(base, { extension: [], extra: "x".repeat(10_000) })
+    expect(Boundary.record(replaced).ok).toBe(true)
+    expect(Object.isFrozen(replaced["extension"])).toBe(true)
+  })
+
   it("detaches caller data before apply and config hooks observe it", async () => {
     const source = { feature: { enabled: true }, values: [{ count: 1 }] }
     const patches = { contributed: { value: 1 } }
