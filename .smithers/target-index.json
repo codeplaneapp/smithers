@@ -11169,7 +11169,7 @@
     "inputs": [
       {
         "kind": "glob",
-        "pattern": "packages/smithers/agent/triggers/test/**/*.test.ts",
+        "pattern": "packages/smithers/agent/triggers/test/**/*.ts",
         "exclude": []
       },
       {

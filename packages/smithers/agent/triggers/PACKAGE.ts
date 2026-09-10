@@ -4,6 +4,7 @@ import { Smithers } from "@smthrs/targets"
 
 const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheckTypeScriptPackage({
   deps: [],
+  tests: Smithers.glob("test/**/*.ts"),
   cwd: "packages/smithers/agent/triggers"
 })
 
