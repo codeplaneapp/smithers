@@ -125,6 +125,11 @@ to write through.
 retries. Rejected and dropped admissions may consume either sequence, so gaps
 are valid.
 
+Post-commit compaction preserves the durable writer caller's Effect
+interruption policy. Ordinary callers can interrupt a slow capture; a write
+inside an uninterruptible cancellation finalizer keeps that policy, so
+journaling cannot abandon the cleanup that follows the commit.
+
 ## Public API
 
 The root exports each module as a namespace, and each is also importable from
@@ -132,16 +137,16 @@ the matching `@smthrs/journal/*` subpath. The
 [API reference](https://journal.smithers.sh/reference/api/) lists every export
 with its one-line summary.
 
-| Namespace        | What it holds                                                                                                                                        |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Namespace        | What it holds                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Journal`        | The service and its operations, the `Checkpoint` and `Compacted` models, typed errors, receipts, read options, constructors, and the no-op layer. |
-| `JournalEvent`   | Branded `RunId`, `Seq`, `SourceId`, and `SourceSeq`; the `Input` and committed `Entry` schemas; deterministic `makeEventId`.                         |
-| `SqlJournal`     | `SqlJournalOptions`, `CompactionPolicy`, and the database-backed `layer(options)`.                                                                   |
-| `OwnerId`        | The fencing token `emitDurable` accepts, carrying `hostId`, `pid`, and `nonce`.                                                                      |
-| `Redaction`      | The payload redaction applied to entries before they are written, its rule set, and `makeNoop`.                                                      |
-| `Projection`     | The reproducible `Projection` model and its identity constructor.                                                                                    |
-| `JournalMetrics` | The `flows_journal_writes` counter and the per-channel views `SqlJournal` updates on every emission receipt.                                         |
-| `Migrations`     | `set`, `run`, and `layer` for this package's two tables: `flows_journal_events` with its event-type index, and `flows_journal_checkpoints`.          |
+| `JournalEvent`   | Branded `RunId`, `Seq`, `SourceId`, and `SourceSeq`; the `Input` and committed `Entry` schemas; deterministic `makeEventId`.                      |
+| `SqlJournal`     | `SqlJournalOptions`, `CompactionPolicy`, and the database-backed `layer(options)`.                                                                |
+| `OwnerId`        | The fencing token `emitDurable` accepts, carrying `hostId`, `pid`, and `nonce`.                                                                   |
+| `Redaction`      | The payload redaction applied to entries before they are written, its rule set, and `makeNoop`.                                                   |
+| `Projection`     | The reproducible `Projection` model and its identity constructor.                                                                                 |
+| `JournalMetrics` | The `flows_journal_writes` counter and the per-channel views `SqlJournal` updates on every emission receipt.                                      |
+| `Migrations`     | `set`, `run`, and `layer` for this package's two tables: `flows_journal_events` with its event-type index, and `flows_journal_checkpoints`.       |
 
 Two test entry points sit outside the root:
 `@smthrs/journal/test/TestJournal` provides the production journal over an

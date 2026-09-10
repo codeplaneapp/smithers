@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Deferred, Effect, Fiber, Layer, Option, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as Statement from "effect/unstable/sql/Statement"
 import { vi } from "vitest"
@@ -50,6 +50,77 @@ const observeBarriers = () => {
 }
 
 describe("automatic compaction maintenance", () => {
+  for (const nested of [false, true]) {
+    for (const compaction of [false, true]) {
+      it.effect(`finishes cancellation cleanup after a durable write (transaction=${nested}, compaction=${compaction})`, () =>
+        Effect.gen(function*() {
+          let finished = false
+          let captures = 0
+          yield* Effect.gen(function*() {
+            const service = yield* Journal
+            const started = yield* Deferred.make<void>()
+            const write = service.emitDurableUnfenced(input(0))
+            const fiber = yield* Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring((nested ? service.transact(write) : write).pipe(
+                Effect.orDie,
+                Effect.andThen(Effect.sync(() => {
+                  finished = true
+                }))
+              )),
+              Effect.forkChild({ startImmediately: true })
+            )
+            yield* Deferred.await(started)
+            yield* Fiber.interrupt(fiber)
+            expect(yield* committed(run)).toEqual([0])
+            expect(finished).toBe(true)
+            expect(captures).toBe(compaction ? 1 : 0)
+          }).pipe(
+            Effect.provide(journal(
+              compaction ?
+                {
+                  compaction: {
+                    entryThreshold: 1,
+                    capture: () =>
+                      Effect.sync(() => {
+                        captures++
+                        return null
+                      })
+                  }
+                } :
+                {}
+            )),
+            Effect.scoped
+          )
+        }))
+    }
+  }
+
+  it.effect("keeps post-transaction capture interruptible for an ordinary caller", () =>
+    Effect.gen(function*() {
+      const reached = yield* Deferred.make<void>()
+      yield* Effect.gen(function*() {
+        const service = yield* Journal
+        const writing = yield* service.transact(service.emitDurableUnfenced(input(0))).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Deferred.await(reached)
+        yield* Fiber.interrupt(writing)
+        const exit = yield* Fiber.await(writing)
+        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        expect(yield* committed(run)).toEqual([0])
+        expect(Option.isNone(yield* service.latestCheckpoint(run))).toBe(true)
+      }).pipe(
+        Effect.provide(journal({
+          compaction: {
+            entryThreshold: 1,
+            capture: () => Deferred.succeed(reached, undefined).pipe(Effect.andThen(Effect.never))
+          }
+        })),
+        Effect.scoped
+      )
+    }))
+
   it.effect("drains a twenty-entry burst across a threshold with one-entry batches", () =>
     Effect.gen(function*() {
       const service = yield* Journal

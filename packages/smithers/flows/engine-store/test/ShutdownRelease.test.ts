@@ -168,6 +168,40 @@ describe("shutdown releases instead of cancelling (issue #26)", () => {
       }))
   }
 
+  it.effect("a persisted cancellation at the retained-scope boundary still closes with an interrupt exit", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const exits: Array<boolean> = []
+        const driver = yield* RunDriver.make({
+          owner,
+          journalSource: "shutdown-retained-cancellation",
+          engine: Effect.succeed(fakeEngine),
+          unsafeOnScopeRetained: (runId) =>
+            store.requestCancel(runId, 0).pipe(
+              Effect.orDie,
+              Effect.andThen(Effect.withFiber((fiber) => Effect.sync(() => fiber.interruptUnsafe())))
+            )
+        })
+        yield* driver.register(TestFlow, () =>
+          Effect.gen(function*() {
+            const instance = yield* FlowRuntime.FlowInstance
+            yield* Scope.addFinalizerExit(instance.scope, (exit) => Effect.sync(() => exits.push(Exit.isFailure(exit))))
+            instance.suspended = true
+            instance.waiting = { reason: "approval", token: "cancelled-approval" }
+            return yield* Effect.interrupt
+          }))
+        const runId = "shutdown-retained-cancellation"
+        yield* store.create(runId, JSON.stringify({ version: 1, flowName: TestFlow._tag, payload: {} }))
+        yield* Effect.exit(driver.resume(TestFlow, runId))
+        return { row: yield* store.get(runId), exits, retained: [...yield* driver.retainedRuns] }
+      })))
+      expect(result.row.status).toBe("cancelled")
+      expect(result.row.owner).toBeNull()
+      expect(result.exits).toEqual([true])
+      expect(result.retained).toEqual([])
+    }))
+
   it.effect("operator interrupt still durably cancels the run", () =>
     Effect.gen(function*() {
       const result = yield* withCrypto(provideJournal(Effect.gen(function*() {
