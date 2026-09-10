@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readFile, readdir } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
 import manifest from "../package.json" with { type: "json" }
 
@@ -38,5 +38,19 @@ describe("documented entry points", () => {
     for (const dependencies of [manifest.peerDependencies, manifest.peerDependenciesMeta, manifest.devDependencies]) {
       expect(dependencies).not.toHaveProperty("@smthrs/platform-browser")
     }
+  })
+
+  it.each([
+    ["@effect/platform-node", "4.0.0-rc.112"],
+    ["@smthrs/database", "1.0.0-rc.0"]
+  ])("declares integration-only %s as a development dependency", async (dependency, version) => {
+    const files = await readdir(new URL("../test/", import.meta.url))
+    const sources = await Promise.all(
+      files.filter((file) => file.endsWith(".integration.test.ts")).map((file) => read(`test/${file}`))
+    )
+    expect(sources.some((source) => source.includes(`from "${dependency}/`))).toBe(true)
+    expect(manifest.devDependencies).toHaveProperty(dependency, version)
+    expect(manifest.dependencies).not.toHaveProperty(dependency)
+    expect(manifest.peerDependencies).not.toHaveProperty(dependency)
   })
 })
