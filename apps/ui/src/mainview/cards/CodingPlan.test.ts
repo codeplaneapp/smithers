@@ -127,4 +127,20 @@ describe("coding product facts from recorded native executions", () => {
     manual.payload.input = { plan: { ...CODING_PLAN, changes: [] } }
     expect(codingPlanOf(manual)).toBeUndefined()
   })
+
+  test("typed early feedback can stop a child while its parent repairs and later validates", () => {
+    const early = JSON.parse(JSON.stringify(codingDecision(6, "observe", "coding/ObservePlan", {
+      parent: "correct", status: "failed"
+    })))
+    early.payload.payload.state.result.exit.cause = [{ _tag: "Fail", error: {
+      _tag: "coding/EarlyFeedback", result: { status: "changes-requested", changes: [], findings: [] }
+    } }]
+    const events = [...preparedCodingJournal(), early]
+    expect(codingEvidenceOf(card(events))).toEqual({ plan: CODING_PLAN })
+    const outcome = { status: "validated", rounds: 2, result: { status: "validated", changes: [], findings: [] }, blocked: null } as const
+    const repaired = [...events, codingDecision(7, "correct", "coding/CorrectPlan", {
+      parent: "request", status: "completed", input: { plan: CODING_PLAN, maxRounds: 2 }, value: outcome
+    })]
+    expect(codingEvidenceOf(card(repaired))).toEqual({ plan: CODING_PLAN, outcome })
+  })
 })

@@ -18,6 +18,7 @@
 import { runSourceCommand } from "../flows/RunCommand"
 import { EmptyState, StatusPill } from "@smthrs/ui"
 import { CodingPlanBody } from "./CodingPlanCard"
+import { CodingPocBody } from "./CodingPocCard"
 import type { Card } from "../state/AppState"
 import { timeLabel } from "../Timestamps"
 import {
@@ -138,6 +139,7 @@ export const RunTraceBody = ({
         ) :
         null}
       <CodingPlanBody card={card} onRunCommand={onRunCommand} />
+      <CodingPocBody card={card} onRunCommand={onRunCommand} />
       <div className="run-trace-bar" role="group" aria-label="Trace filters">
         <div className="run-trace-views" role="group" aria-label="Trace presentation">
           {(["turns", "timeline"] as const).map((mode) => (

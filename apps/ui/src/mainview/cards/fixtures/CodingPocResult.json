@@ -1,0 +1,47 @@
+{
+  "status": "drafted-unvalidated",
+  "source": {
+    "changeId": "yzqluoyxrksxlwoyrvopolmlmtxpmnpl",
+    "commitId": "fd4f8311275ae3a95ccfb6ad828386504ab2eeb2",
+    "treeId": "2ec1e4bd51481b61b09658937ae206a6d12a5363",
+    "operationId": "9d58e80f873f89e7c1062554b79863e1523b85d97d1f9c3ae769db85efd2ef999547337e167edc28f9777eed65e0dc108b232a070f25cff9e2c986740a043430",
+    "parentCommitIds": [
+      "0000000000000000000000000000000000000000"
+    ]
+  },
+  "changes": {
+    "sourceDigest": "0f0047036c92a24f5b89fa014c69f6d3348a45010b00a8b5106d9e8710188d6f",
+    "transactionBase": "key1_d59680787456354703ab72bc6000e5fccfc93d2c1b20dc8679ebec0dd8f9ad5c",
+    "files": [
+      {
+        "path": "index.html",
+        "before": "<h1>Original</h1>\n",
+        "after": "<h1>Prototype</h1>\n",
+        "beforeDigest": "7f0666533f2b301b31daf2ed87a49a2ff42f5674b35834c8864185db2f244152",
+        "afterDigest": "b61ce2a7d8eff31e2fc2140667090b9e5e20da1f83fefdf40eefe1f0e16ece7d"
+      },
+      {
+        "path": "new.txt",
+        "before": null,
+        "after": "Prototype only\n",
+        "beforeDigest": null,
+        "afterDigest": "b28e17349876054eb36da846483642897b9a05a24f28dde93aea961fedb8f674"
+      },
+      {
+        "path": "remove.txt",
+        "before": "﻿Original file\n",
+        "after": null,
+        "beforeDigest": "0fce3016252d310b34e5e77445021cd0d47b43d6605e98973b2d03ff83f23e5f",
+        "afterDigest": null
+      }
+    ],
+    "preview": {
+      "mediaType": "text/html",
+      "content": "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>Disposable prototype</title><style>body{font:16px system-ui;max-width:1100px;margin:40px auto;padding:0 20px;color:#182431}h1{margin-bottom:8px}.note{color:#576779}article{margin:30px 0;border-top:1px solid #ddd}section{display:grid;grid-template-columns:1fr 1fr;gap:16px}pre{overflow:auto;background:#f4f6f8;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere}h2{font-size:18px}</style><h1>Disposable prototype</h1><p class=\"note\">Drafted and discarded. No build or tests ran. This is a retained source preview.</p><article><h2>index.html</h2><section><div><h3>Before</h3><pre>&lt;h1&gt;Original&lt;/h1&gt;\n</pre></div><div><h3>After</h3><pre>&lt;h1&gt;Prototype&lt;/h1&gt;\n</pre></div></section></article><article><h2>new.txt</h2><section><div><h3>Before</h3><pre>[absent]</pre></div><div><h3>After</h3><pre>Prototype only\n</pre></div></section></article><article><h2>remove.txt</h2><section><div><h3>Before</h3><pre>﻿Original file\n</pre></div><div><h3>After</h3><pre>[removed]</pre></div></section></article></html>"
+    }
+  },
+  "findings": [
+    "The measured title changed; rendering remains untested."
+  ],
+  "feedback": "Saved disposable file-level POC: drafted-unvalidated. No build or tests ran.\nSource commit: fd4f8311275ae3a95ccfb6ad828386504ab2eeb2; captured input digest: 0f0047036c92a24f5b89fa014c69f6d3348a45010b00a8b5106d9e8710188d6f\nMeasured changed files: index.html, new.txt, remove.txt\nReview findings (model hypotheses unless directly supported by the retained diff):\nThe measured title changed; rendering remains untested.\nSecond-plan guidance: Keep the production title change small and run real checks."
+}

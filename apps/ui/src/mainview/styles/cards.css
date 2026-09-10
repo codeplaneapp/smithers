@@ -2279,3 +2279,7 @@
 .coding-plan-paths ul, .coding-plan-checks { list-style: none; padding: 0; }
 .coding-plan-checks li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.25rem 1rem; }
 @media (max-width: 640px) { .coding-plan-paths { grid-template-columns: minmax(0, 1fr); } }
+
+.coding-poc { overflow-wrap: anywhere; }
+.coding-poc .run-trace-code { max-height: 10rem; }
+.coding-poc .run-trace-code:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }

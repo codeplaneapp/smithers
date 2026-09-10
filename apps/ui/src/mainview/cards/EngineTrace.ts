@@ -334,3 +334,39 @@ export const engineTraceFromJournal = (records: ReadonlyArray<JournalRecord>): A
 /** Product claims use these typed facts, never text rendered into trace details. */
 export const engineExecutionEvidence = (records: ReadonlyArray<JournalRecord>): ReadonlyArray<EngineExecutionEvidence> =>
   foldEngineJournal(records).evidence
+
+/** Same recorded native ancestry and historical cursor for every product result projection. */
+export const engineRunEvidence = (records: ReadonlyArray<JournalRecord>, rootId: string, cursorSeq?: number) => {
+  const visible: ReadonlyArray<JournalRecord> = records
+    .filter((row) => Number.isSafeInteger(row.sequence) && Number(row.sequence) >= 0 &&
+      (cursorSeq === undefined || Number(row.sequence) <= cursorSeq))
+    .sort((left, right) => Number(left.sequence) - Number(right.sequence))
+  const executions = engineExecutionEvidence(visible)
+  const generations = new Map<string, Array<EngineExecutionEvidence>>()
+  for (const execution of executions) {
+    const found = generations.get(execution.executionId) ?? []
+    found.push(execution)
+    generations.set(execution.executionId, found)
+  }
+  const current = (execution: EngineExecutionEvidence) => execution.coherent &&
+    execution.generation === Math.max(...(generations.get(execution.executionId) ?? []).map((row) => row.generation))
+  const belongs = (execution: EngineExecutionEvidence, ownerId = rootId): boolean => {
+    const visited = new Set<string>()
+    let candidate: EngineExecutionEvidence | undefined = execution
+    while (candidate !== undefined) {
+      if (!candidate.coherent || !candidate.parentKnown || visited.has(candidate.executionId)) return false
+      visited.add(candidate.executionId)
+      if (candidate.executionId === ownerId) return ownerId !== rootId || candidate.parentExecutionId === undefined
+      if (candidate.parentExecutionId === undefined) return false
+      const parents: ReadonlyArray<EngineExecutionEvidence> = generations.get(candidate.parentExecutionId) ?? []
+      // A child names a native parent ID, not its generation. Never infer a
+      // parent generation from arrival time after a rewind.
+      if (parents.length !== 1) return false
+      candidate = parents[0]
+    }
+    return false
+  }
+  const owned = executions.filter((row) => current(row) && belongs(row))
+  const completed = owned.filter((row) => row.status === "completed" && row.result !== undefined)
+  return { executions: owned, completed, belongs }
+}

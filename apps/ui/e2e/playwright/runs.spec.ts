@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test"
 import type { Locator, Page } from "@playwright/test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { CODING_PLAN } from "../../src/mainview/cards/fixtures/CodingPlan"
 import { blockedCodingJournal } from "../../src/mainview/cards/fixtures/CodingJournal"
 import { installCloudFixture } from "./cloudFixture.ts"
@@ -345,4 +347,80 @@ test("T1: coding plan launch, inspection and restoration work with only the keyb
   await expect(card).toHaveAttribute("data-maximized", "true")
   expect(await card.getByRole("region", { name: "Coding plan" }).evaluate((element, original) => element === original, node)).toBe(true)
   expect(rpc.some((call) => call.procedure === "Run")).toBe(true)
+})
+
+
+test("T1: real retained prototype source and feedback remain embedded and keyboard accessible", async ({ page }) => {
+  test.setTimeout(120_000)
+  const records = readFileSync(join(__dirname, "../../src/mainview/cards/fixtures/CodingPocHostDecisions.ndjson"), "utf8").trim().split("\n").map(line => JSON.parse(line))
+  const events = JSON.parse(JSON.stringify(records).replaceAll('"run-1"', JSON.stringify(RUN_ID)))
+  const { rpc } = await serve(page, events)
+  await page.goto("/")
+  await finishGuide(page)
+  await page.keyboard.press("Control+k")
+  await page.keyboard.insertText(`/flow.run coding ${REPO} ${JSON.stringify({ prompt: "Add a greeting" })}`)
+  await page.keyboard.press("Enter")
+  const card = page.getByTestId(`card-flow-run-${RUN_ID}`)
+  const poc = card.getByRole("region", { name: "Disposable prototype", exact: true })
+  await expect(poc).toContainText("Drafted and discarded. No build or tests ran.")
+  const preview = poc.getByText("Retained source preview", { exact: true })
+  await tabTo(page, preview)
+  await page.keyboard.press("Enter")
+  await expect(poc.getByRole("region", { name: "hello.txt", exact: true })).toContainText("prototype greeting")
+  await expect(poc.locator("iframe, script, img")).toHaveCount(0)
+  await page.screenshot({ path: "/tmp/smithers-coding-poc-source-ui.png", fullPage: true })
+  const feedback = poc.getByRole("button", { name: "Give prototype feedback", exact: true })
+  await tabTo(page, feedback)
+  await page.keyboard.press("Enter")
+  const form = page.locator('.flow-form[data-flow-name="runs.steer"]')
+  const body = form.getByTestId("flow-form-body")
+  await expect(body).toBeVisible()
+  await expect(form).toHaveAttribute("data-via", "user")
+  await tabTo(page, body)
+  await page.keyboard.insertText("Keep the greeting small; use the expected real text.")
+  await page.keyboard.press("Tab")
+  const submit = form.getByTestId("flow-form-submit")
+  await expect(submit).toBeEnabled()
+  await tabTo(page, submit)
+  await page.keyboard.press("Enter")
+  await expect.poll(() => rpc.find(call => call.procedure === "Steer")?.payload).toMatchObject({
+    runId: RUN_ID, message: { kind: "Message", body: "Keep the greeting small; use the expected real text.", runId: RUN_ID }
+  })
+  await expect(card).toContainText("steering pending")
+  await expect(card).not.toContainText("Validated after")
+  await page.keyboard.press("Escape")
+  await page.reload()
+  await expect(poc).toContainText("Drafted and discarded. No build or tests ran.")
+  await expect(card).toHaveAttribute("data-maximized", "false")
+})
+
+test("T1: bounded long prototype values keep the summary compact and source keyboard-scrollable", async ({ page }) => {
+  test.setTimeout(120_000)
+  // Synthetic display bounds around the real producer envelope; this test
+  // makes no claim that these deliberately long values were a native POC.
+  const records = readFileSync(join(__dirname, "../../src/mainview/cards/fixtures/CodingPocHostDecisions.ndjson"), "utf8").trim().split("\n").map(line => JSON.parse(line))
+  const events = JSON.parse(JSON.stringify(records).replaceAll('"run-1"', JSON.stringify(RUN_ID)))
+  const result = events.find((row: { sequence: number }) => row.sequence === 263).payload.payload.state.result.exit.value
+  result.findings = ["Unvalidated hypothesis. ".repeat(600)]
+  result.feedback = "Long next-plan feedback. ".repeat(1000)
+  result.changes.files[0].after = "Long retained source line.\n".repeat(2000)
+  await serve(page, events)
+  await page.goto("/")
+  await finishGuide(page)
+  await page.keyboard.press("Control+k")
+  await page.keyboard.insertText(`/flow.run coding ${REPO} ${JSON.stringify({ prompt: "Inspect source bounds" })}`)
+  await page.keyboard.press("Enter")
+  const poc = page.getByRole("region", { name: "Disposable prototype", exact: true })
+  await expect(poc).toBeVisible()
+  expect((await poc.boundingBox())!.height).toBeLessThan(350)
+  expect(await poc.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
+  const preview = poc.getByText("Retained source preview", { exact: true })
+  await tabTo(page, preview)
+  await page.keyboard.press("Enter")
+  const source = poc.getByRole("region", { name: "hello.txt", exact: true }).locator("pre").last()
+  await tabTo(page, source)
+  expect((await source.boundingBox())!.height).toBeLessThanOrEqual(162)
+  await page.keyboard.press("PageDown")
+  await expect.poll(() => source.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
+  await page.screenshot({ path: "/tmp/smithers-coding-poc-long-source-ui.png", fullPage: true })
 })

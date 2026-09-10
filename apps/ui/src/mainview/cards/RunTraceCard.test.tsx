@@ -1,7 +1,8 @@
+import { CODING_POC_HOST_EVENTS, CODING_POC_RESULT, codingPocJournal } from "./fixtures/CodingPoc"
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
-import { afterAll, describe, expect, test } from "bun:test"
-import { flushSync } from "react-dom"
-import { createRoot } from "react-dom/client"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { act } from "react"
+import { createRoot, type Root } from "react-dom/client"
 import type { Card } from "../state/AppState"
 import { PROTOTYPE_BANNER, RunTraceBody } from "./RunTraceCard"
 import { WorkflowRunCardBody } from "./WorkflowCards"
@@ -21,11 +22,20 @@ import { blockedCodingJournal, preparedCodingJournal } from "./fixtures/CodingJo
  */
 
 GlobalRegistrator.register()
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+const mounted: Array<{ root: Root; host: HTMLElement }> = []
+afterEach(async () => {
+  for (const { root, host } of mounted.splice(0)) {
+    await act(async () => root.unmount())
+    host.remove()
+  }
+})
 
 afterAll(async () => {
   for (let tick = 0; tick < 3; tick += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
+  delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
   await GlobalRegistrator.unregister()
 })
 
@@ -74,8 +84,10 @@ const noop = (): void => {}
 const render = (element: React.ReactElement): HTMLElement => {
   const host = document.createElement("div")
   document.body.append(host)
-  flushSync(() => {
-    createRoot(host).render(element)
+  const root = createRoot(host)
+  mounted.push({ root, host })
+  act(() => {
+    root.render(element)
   })
   return host
 }
@@ -103,7 +115,7 @@ const chips = (host: HTMLElement): Array<string | null> =>
   [...host.querySelectorAll("[data-filter]")].map((chip) => chip.getAttribute("data-filter"))
 
 const click = (element: Element | null): void => {
-  flushSync(() => {
+  act(() => {
     ;(element as HTMLElement).click()
   })
 }
@@ -379,5 +391,36 @@ describe("predicted coding Changes in the same run card", () => {
   test("missing or invalid input cannot fabricate a coding plan", () => {
     expect(renderTrace({ workflow: "coding" }).host.querySelector("[aria-label='Coding plan']")).toBeNull()
     expect(renderTrace({ input: { plan: { ...CODING_PLAN, changes: [CODING_PLAN.changes[0], CODING_PLAN.changes[0]] } } }).host.querySelector("[aria-label='Coding plan']")).toBeNull()
+  })
+})
+
+
+describe("retained prototype card", () => {
+  test("real child source, findings and steering use the same embedded native card", () => {
+    const { host, dispatched } = renderTrace({ events: CODING_POC_HOST_EVENTS, lastSeq: 263 })
+    const poc = host.querySelector('[aria-label="Disposable prototype"]')!
+    expect(poc.textContent).toContain("Drafted and discarded. No build or tests ran.")
+    expect(poc.textContent).toContain("prototype greeting")
+    const buttons = [...poc.querySelectorAll("button")]
+    buttons.find(button => button.textContent?.includes("Inspect prototype execution"))!.click()
+    buttons.find(button => button.textContent?.includes("Give prototype feedback"))!.click()
+    expect(dispatched).toEqual([
+      { name: "runs.trace.select", args: "sourceCard=flow-run-run-1 run-1 engine:a4392ed73b6ef7680ecd9a7068f3804e19d4e7de0358944469d54ebe8f4368fa:0" },
+      { name: "runs.steer", args: "sourceCard=flow-run-run-1 run-1" }
+    ])
+    const completed = renderTrace({ events: CODING_POC_HOST_EVENTS, lastSeq: 263, phase: "completed" }).host
+    expect(completed.querySelector('[aria-label="Disposable prototype"]')).not.toBeNull()
+    expect(completed.querySelector('[aria-label="Disposable prototype"] [data-flow="runs.steer"]')).toBeNull()
+  })
+
+  test("file values are literal text; retained HTML and proposed scripts are not executed", () => {
+    const result = { ...CODING_POC_RESULT, changes: { ...CODING_POC_RESULT.changes, files: [
+      { ...CODING_POC_RESULT.changes.files[0]!, after: '<script>globalThis.pocExecuted = true</script><img src="https://example.test/leak">' }
+    ], preview: { mediaType: "text/html" as const, content: '<script>globalThis.pocExecuted = true</script>' } } }
+    const { host } = renderTrace({ events: codingPocJournal(result), lastSeq: 4 })
+    const poc = host.querySelector('[aria-label="Disposable prototype"]')!
+    expect(poc.textContent).toContain('<script>globalThis.pocExecuted = true</script>')
+    expect(poc.querySelector("script, iframe, img")).toBeNull()
+    expect(renderTrace({ events: codingPocJournal(result), lastSeq: 4, cursorSeq: 3 }).host.querySelector('[aria-label="Disposable prototype"]')).toBeNull()
   })
 })

@@ -6,41 +6,10 @@ import { Action, Flow, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import { Effect, Layer, Schema } from "effect"
 import { evidenceOnly } from "./planning-authority.ts"
-import { CodingError, Plan, Revision } from "./schema.ts"
+import { CodingError, Revision } from "./schema.ts"
+import { PocInput, PocSource, PocDraft, PocChanges, PocReview, PocResult } from "./poc-schema.ts"
+export { PocInput, PocSource, PocDraft, PocChanges, PocResult } from "./poc-schema.ts"
 
-const Text = Schema.NonEmptyString.check(Schema.isMaxLength(16_384))
-const Content = Schema.String.check(Schema.isMaxLength(65_536))
-const FilePath = Schema.NonEmptyString.check(Schema.isMaxLength(4096))
-export const PocInput = Schema.Struct({ plan: Plan, source: Revision })
-export const PocSource = Schema.Struct({
-  revision: Revision,
-  files: Schema.Array(Schema.Struct({ path: FilePath, content: Schema.NullOr(Content) })).check(Schema.isMaxLength(48)),
-  writable: Schema.Array(FilePath).check(Schema.isMaxLength(48)),
-  digest: Schema.NonEmptyString
-})
-export type PocSource = typeof PocSource.Type
-export const PocDraft = Schema.Struct({
-  explanation: Text,
-  files: Schema.Array(Schema.Struct({ path: FilePath, content: Schema.NullOr(Content) }))
-    .check(Schema.isMinLength(1), Schema.isMaxLength(48))
-})
-export type PocDraft = typeof PocDraft.Type
-export const PocChanges = Schema.Struct({
-  sourceDigest: Schema.NonEmptyString,
-  transactionBase: Schema.NonEmptyString,
-  files: Schema.Array(Schema.Struct({ path: FilePath, before: Schema.NullOr(Content), after: Schema.NullOr(Content),
-    beforeDigest: Schema.NullOr(Schema.String), afterDigest: Schema.NullOr(Schema.String) })).check(Schema.isMaxLength(48)),
-  preview: Schema.Struct({ mediaType: Schema.Literal("text/html"), content: Schema.String.check(Schema.isMaxLength(4_194_304)) })
-})
-const Review = Schema.Struct({
-  findings: Schema.Array(Text).check(Schema.isMinLength(1), Schema.isMaxLength(12)),
-  nextPlan: Text
-})
-export const PocResult = Schema.Struct({
-  status: Schema.Literal("drafted-unvalidated"), source: Revision, changes: PocChanges,
-  findings: Review.fields.findings, feedback: Schema.String.check(Schema.isMaxLength(32_768))
-})
-export type PocResult = typeof PocResult.Type
 const Error = Schema.Union([CodingError, AgentAction.AgentFailure])
 export const invalid = (message: string) => new CodingError({ code: "invalid_plan", message })
 export const validPath = (path: string) => path.length > 0 && path.length <= 4096 && !/[\\\0]/.test(path) &&
@@ -65,9 +34,9 @@ export const MaterializePoc = Action.make("coding/materialize-poc", {
   payload: { source: PocSource, draft: PocDraft }, success: PocChanges, error: CodingError
 })
 export const ReviewPoc = AgentAction.make("coding/review-poc", {
-  payload: { input: PocInput, source: Revision, draftExplanation: Text,
+  payload: { input: PocInput, source: Revision, draftExplanation: PocDraft.fields.explanation,
     changes: Schema.Struct({ sourceDigest: PocChanges.fields.sourceDigest,
-      transactionBase: PocChanges.fields.transactionBase, files: PocChanges.fields.files }) }, output: Review, seat: "coding/poc",
+      transactionBase: PocChanges.fields.transactionBase, files: PocChanges.fields.files }) }, output: PocReview, seat: "coding/poc",
   system: [
     "Review this actually materialized, discarded file-level prototype and its measured before/after contents.",
     "Identify lessons for a second implementation plan. Distinguish observed source changes from hypotheses about runtime behavior.",
@@ -76,7 +45,7 @@ export const ReviewPoc = AgentAction.make("coding/review-poc", {
   ], prompt: value => JSON.stringify(value)
 })
 export const RetainPoc = Action.make("coding/retain-poc", {
-  payload: { source: PocSource, changes: PocChanges, review: Review }, success: PocResult, error: CodingError,
+  payload: { source: PocSource, changes: PocChanges, review: PocReview }, success: PocResult, error: CodingError,
   nondeterministic: true
 })
 
