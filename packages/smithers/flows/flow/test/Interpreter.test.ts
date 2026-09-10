@@ -283,6 +283,64 @@ describe("Interpreter branches", () => {
 })
 
 describe("Interpreter catches", () => {
+  for (
+    const [operation, node] of [
+      ["mapper", Read.call({ path: "counter.txt" }).pipe(Node.map((value) => value.value))],
+      [
+        "predicate",
+        Node.succeed(1).pipe(Node.branch({
+          if: (value) => value > 0,
+          then: () => Node.succeed(1),
+          else: () => Node.succeed(0)
+        }))
+      ],
+      [
+        "schema filter",
+        Node.succeed(1).pipe(Node.catch({
+          error: Schema.String,
+          onFailure: () => Node.succeed(0)
+        }))
+      ]
+    ] as const
+  ) {
+    it.effect(`refuses a detached ${operation} inside an unfiltered catch before dispatch`, () =>
+      Effect.gen(function*() {
+        calls.length = 0
+        const caught = Read.call({ path: "upstream.txt" }).pipe(
+          Node.andThen(node),
+          Node.catch({ onFailure: () => Node.succeed("recovered-from-interpreter-refusal") })
+        )
+
+        const exit = yield* drive(Effect.exit(Interpreter.interpret(detached(caught))))
+        expect(calls).toEqual([])
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(exit.cause.reasons[0]).toMatchObject({
+            error: {
+              _tag: "@smthrs/flow/InterpreterError",
+              code: "missing_operation",
+              message: expect.stringContaining(`lost its ${operation}`)
+            }
+          })
+        }
+      }))
+  }
+
+  it.effect("does not recover a walk-time interpreter refusal with an unfiltered catch", () =>
+    Effect.gen(function*() {
+      const Callee = Flow.make("interpreter/caught-leaf-callee", {
+        payload: {},
+        success: Schema.Number,
+        body: () => Node.succeed(1)
+      })
+      const inline = Node.flowCall<number>(Callee, Callee._tag, "inline", {})
+      const caught = inline.pipe(Node.catch({ onFailure: () => Node.succeed(0) }))
+
+      expect(yield* refusal(Interpreter.interpret(detached(caught)))).toMatchObject({
+        error: { _tag: "@smthrs/flow/InterpreterError", code: "unsupported_call", node: "root.protected" }
+      })
+    }))
+
   it.effect("takes a matching failure arm and binds the typed error", () =>
     Effect.gen(function*() {
       const interpretation = yield* drive(Interpreter.interpret(
@@ -648,11 +706,13 @@ describe("Interpreter refusals", () => {
 
   it.effect("refuses a map whose deferred function did not survive serialization", () =>
     Effect.gen(function*() {
-      const lost = detached(Node.succeed(1).pipe(Node.map((value) => value + 1)))
+      calls.length = 0
+      const lost = detached(Read.call({ path: "counter.txt" }).pipe(Node.map((value) => value.value + 1)))
 
       expect(yield* refusal(Interpreter.interpret(lost))).toMatchObject({
         error: { _tag: "@smthrs/flow/InterpreterError", code: "missing_operation", node: "root" }
       })
+      expect(calls).toEqual([])
     }))
 
   it.effect("refuses an inline call it keeps as a leaf, naming the same process and the boundary as the fixes", () =>

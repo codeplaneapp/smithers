@@ -120,6 +120,10 @@ topology exists to avoid.
 | `unsupported_call`     | A call whose declaration did not survive serialization.  |
 | `missing_operation`    | A deferred function that did not survive serialization.  |
 
+Missing mappers, branch predicates, and catch schema filters are refused before
+any action dispatch, including operations in untaken arms. `Node.catch` cannot
+recover an `InterpreterError`, even without an error schema.
+
 `unresolved_action` is the one an author meets most: it means a layer is missing
 from the composition, or `Action.layerImplementations` was merged beside the
 implementation layers instead of provided under them.

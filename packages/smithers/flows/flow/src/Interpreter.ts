@@ -257,7 +257,7 @@ const interpretWithPolicy = (
     }
 
     // Everything the walk needs that the built graph can be asked for before it
-    // runs, is asked for here — so neither refusal can surface halfway through a
+    // runs, is asked for here — so no such refusal can surface halfway through a
     // body with the actions ahead of it already committed.
     //
     // A reference out of the graph is the first: a round may be PLANNED against
@@ -267,10 +267,22 @@ const interpretWithPolicy = (
     // error rather than a run-time contingency: every action the graph names
     // is resolved up front, including the ones only an untaken branch arm would
     // have reached, because the plan is the declared ceiling of what may run.
+    // Deferred operations must likewise survive beside every AST, even when
+    // the walk would skip their branch or catch arm.
     const implementations = new Map<string, Implementation>()
     const handoffDeclarations = new Map<string, AnyFlow>()
     const childDeclarations = new Map<string, AnyWithProps>()
     for (const node of graphNodes) {
+      const ast = node.ast
+      if (ast._tag === "Map" && Node.mapper(ast) === undefined) {
+        return yield* refuse("missing_operation", node.id, `Map at "${node.id}" lost its mapper.`)
+      }
+      if (ast._tag === "Branch" && Node.predicate(ast) === undefined) {
+        return yield* refuse("missing_operation", node.id, `Branch at "${node.id}" lost its predicate.`)
+      }
+      if (ast._tag === "Catch" && ast.filter !== undefined && Node.catchFilter(ast) === undefined) {
+        return yield* refuse("missing_operation", node.id, `Catch at "${node.id}" lost its schema filter.`)
+      }
       for (const dependency of KeyMaterial.dependencies(node.draft.material)) {
         if (byId.has(dependency)) continue
         return yield* refuse(
@@ -501,26 +513,22 @@ const interpretWithPolicy = (
           // The predicate decides on the REAL value, and only the arm it chose
           // is settled. Both arms are still in the plan; the untaken one is
           // reported as skipped.
-          const decide = Node.predicate(ast)
-          if (decide === undefined) {
-            return yield* refuse("missing_operation", node.id, `Branch at "${node.id}" lost its predicate.`)
-          }
+          const decide = Node.predicate(ast)!
           const subject = yield* settle(children[0]!)
           return yield* settle(decide(subject) ? children[1]! : children[2]!)
         }
         if (ast._tag === "Catch") {
           // DECIDED: catch observes only typed
-          // failures from ordinary protected execution. Effect defects and
+          // failures from ordinary protected execution. Interpreter refusals
+          // propagate unchanged. Effect defects and
           // compensation failures remain outside this interpreter's error
           // channel, so recovery cannot conceal a broken invariant or weaken
           // withRollback's compensation guarantees.
           const protectedId = children[0]!
           return yield* Effect.matchEffect(settle(protectedId), {
             onFailure: (error) => {
+              if (Schema.is(InterpreterError)(error)) return Effect.fail(error)
               const filter = Node.catchFilter(ast)
-              if (ast.filter !== undefined && filter === undefined) {
-                return refuse("missing_operation", node.id, `Catch at "${node.id}" lost its schema filter.`)
-              }
               if (filter !== undefined && !Schema.is(filter)(error)) {
                 return Effect.fail(error)
               }
@@ -557,10 +565,7 @@ const interpretWithPolicy = (
           case "Succeed":
             return resolve(node.payload)
           case "Map": {
-            const transform = Node.mapper(ast)
-            if (transform === undefined) {
-              return yield* refuse("missing_operation", node.id, `Map at "${node.id}" lost its mapper.`)
-            }
+            const transform = Node.mapper(ast)!
             return transform(yield* settle(children[0]!))
           }
           case "All": {
