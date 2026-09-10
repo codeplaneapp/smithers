@@ -355,6 +355,30 @@ describe("Install", () => {
     })
   })
 
+  it("refuses a manager pointed at a shared host store outside the declared boundary", async () => {
+    await withFixture(async (root) => {
+      let fetched = false
+      const service = managerService({
+        root,
+        evidence: "0".repeat(64) as PackageManager.Digest,
+        storeDirectory: "/var/cache/smthrs/pnpm",
+        onFetch: () => {
+          fetched = true
+        }
+      })
+      const content = await installContent(root)
+
+      await expect(Effect.runPromise(
+        Install.executeFetch({ content }).pipe(
+          Effect.provide(NodeServices.layer),
+          Effect.provideService(PackageManager.PackageManager, service),
+          Effect.provideService(Runtime.Runtime, runtimeService())
+        )
+      )).rejects.toThrow(/install Flow boundary requires pnpm-lock\.yaml and \.flows\/store\/pnpm/)
+      expect(fetched).toBe(false)
+    })
+  })
+
   it("refuses a manager whose paths disagree with the declared Flow boundary", async () => {
     await withFixture(async (root) => {
       let versionRead = false

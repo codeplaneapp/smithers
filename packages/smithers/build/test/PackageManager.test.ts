@@ -54,6 +54,7 @@ const writeExecutable = async (path: string, body: string): Promise<void> => {
 const makePnpm = (projectRoot: string, executable: string, options: {
   readonly environment?: Readonly<Record<string, string | undefined>>
   readonly timeoutMs?: number
+  readonly storeDirectory?: string
 } = {}) =>
   Effect.runPromise(
     PackageManager.makePnpm({
@@ -61,7 +62,8 @@ const makePnpm = (projectRoot: string, executable: string, options: {
       projectRoot,
       executable,
       environment: options.environment ?? process.env,
-      timeoutMs: options.timeoutMs
+      timeoutMs: options.timeoutMs,
+      storeDirectory: options.storeDirectory
     }).pipe(Effect.provide(NodeServices.layer), Effect.provide(runtimeLayer))
   )
 
@@ -646,6 +648,65 @@ describe("PackageManager.storeRoot", () => {
         NodePath.join(root, ".flows/store/pnpm")
       ])
     })
+  })
+
+  it("points fetch and link at a shared host store when one is named", async () => {
+    await withFixture("package-manager-host-store", async (root) => {
+      const store = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-shared-store-")))
+      try {
+        const executable = NodePath.join(root, "pnpm.mjs")
+        await writeExecutable(
+          executable,
+          `import { appendFileSync } from "node:fs"\n` +
+            `if (process.argv[2] === "--version") { process.stdout.write("11.21.0\\n"); process.exit(0) }\n` +
+            `appendFileSync("calls", JSON.stringify(process.argv.slice(2)) + "\\n")`
+        )
+        const manager = await makePnpm(root, executable, { storeDirectory: store })
+        expect(manager.storeDirectory).toBe(store)
+        await Effect.runPromise(manager.fetch)
+        await Effect.runPromise(manager.link)
+        const calls = (await Fs.readFile(NodePath.join(root, "calls"), "utf8")).trim().split("\n")
+          .map((line) => JSON.parse(line) as Array<string>)
+        expect(calls).toEqual([
+          ["fetch", "--frozen-lockfile", "--ignore-scripts", "--reporter=append-only", "--store-dir", store],
+          [
+            "install",
+            "--offline",
+            "--frozen-lockfile",
+            "--ignore-scripts",
+            "--reporter=append-only",
+            "--store-dir",
+            store
+          ]
+        ])
+      } finally {
+        await Fs.rm(store, { recursive: true, force: true })
+      }
+    })
+  })
+
+  it.each([
+    ["", /storeDirectory must be a usable absolute path/],
+    [".flows/store/pnpm", /storeDirectory must be a usable absolute path/],
+    ["/shared/store\u0000", /storeDirectory must be a usable absolute path/]
+  ])("refuses a store directory that is not a usable absolute path: %j", (storeDirectory, message) => {
+    expect(() =>
+      PackageManager.makeNoop(
+        "pnpm",
+        { requirement: "11.21.0", projectRoot: "/workspace", storeDirectory },
+        platform
+      )
+    ).toThrow(message)
+  })
+
+  it("refuses a store directory inside the project root", () => {
+    expect(() =>
+      PackageManager.makeNoop(
+        "pnpm",
+        { requirement: "11.21.0", projectRoot: "/workspace", storeDirectory: "/workspace/.flows/store/pnpm" },
+        platform
+      )
+    ).toThrow(/storeDirectory must be outside the project root/)
   })
 
   it.each([

@@ -204,6 +204,12 @@ export const Measure = Action.make("smithers-build/install/measure", {
  * Every manager uses a workspace-local directory beneath `.flows/store`.
  * This static path keeps the write declaration exact and makes a future
  * sandbox-root-aware implementation possible without changing the Flow API.
+ * It costs a full download and unpack per clone or worktree, because a file
+ * set names no host path and so a store the Flow can declare is a store only
+ * one workspace owns. `PackageManager.Options.storeDirectory` names a shared
+ * host store for a composition that drives the manager directly;
+ * {@link verifyManagerContract} refuses such a service here rather than
+ * declaring this path and writing another.
  *
  * @category actions
  * @since 0.1.0

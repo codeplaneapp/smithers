@@ -107,8 +107,23 @@ See [Configuration](../workspace/configuration.md).
 
 ## Can I move the package-manager store?
 
-Not today. Manager stores stay at `.flows/store/<manager>` regardless of
-`cacheDirectory`. The direct `install` command therefore rejects a custom cache
-directory instead of declaring one path and writing another. Other target verbs
-may use a custom directory. Supporting configurable install stores requires the
+Not through the install Flow. Manager stores stay at `.flows/store/<manager>`
+regardless of `cacheDirectory`, because fetch declares that fixed
+workspace-relative tree as its write set and a file set names no host path. The
+direct `install` command therefore rejects a custom cache directory instead of
+declaring one path and writing another. Other target verbs may use a custom
+directory. Supporting configurable install stores through the Flow requires the
 declaration and host-state substitution to change together.
+
+Budget for the cost. pnpm's own model is one machine-wide store that every
+checkout hardlinks from; a workspace-local store gives that up, so each clone
+and each worktree downloads and unpacks the whole dependency set again and
+keeps its own copy. A CI cache for an install must be sized for the full
+workspace store per checkout, and a warm store elsewhere on the machine is not
+reused.
+
+A composition that drives `PackageManager` directly, outside the install Flow,
+can pass `storeDirectory` to `makePnpm`, `layerPnpm`, or `layerNoop`. It is an
+absolute host path outside the project root, used for both `pnpm fetch` and the
+offline link, and it restores the shared store. `Install.executeFetch` refuses a
+service whose store is not `.flows/store/<manager>`.

@@ -205,6 +205,11 @@ export type StoreManifest = typeof StoreManifest.Type
  * reads the store locally and writes `node_modules`; neither tree is currently
  * published.
  *
+ * A store the workspace owns is a store no sibling checkout links out of, so
+ * each clone or worktree downloads and unpacks the whole dependency set again
+ * and keeps its own copy. {@link Options.storeDirectory} names a host store
+ * instead, for a composition that drives a manager outside the install Flow.
+ *
  * @category constants
  * @since 0.1.0
  * @slop
@@ -276,7 +281,12 @@ export interface Service {
   readonly name: Name
   /** Absolute project root every filesystem read and child process is anchored to. */
   readonly projectRoot: string
-  /** Workspace-relative store directory captured by the fetch boundary. */
+  /**
+   * The store directory this manager writes: workspace-relative below
+   * {@link storeRoot} by default, or the absolute host path
+   * {@link Options.storeDirectory} named. Only the default matches what the
+   * install Flow's fetch boundary declares.
+   */
   readonly storeDirectory: string
   /** The lockfile this manager reads, relative to the project root. */
   readonly lockfileName: string
@@ -365,6 +375,23 @@ export interface Options {
    * The manager executable, when it is not on `PATH` under its own name.
    */
   readonly executable?: string | undefined
+  /**
+   * An absolute host directory holding the manager's content-addressable
+   * store, outside {@link Options.projectRoot}.
+   *
+   * Omitted, every manager stores beneath the workspace-local
+   * {@link storeRoot}, which is the only layout the install Flow admits: its
+   * fetch action declares that fixed workspace-relative tree as its write set,
+   * and a file set names no host path. The cost of that default is a complete
+   * download and unpack per clone or worktree, because a store one workspace
+   * owns is a store no other workspace links out of.
+   *
+   * A composition that drives the manager directly can name a host store here
+   * and get the manager's own model back: one machine-wide store every
+   * checkout hardlinks from. The install Flow's fetch refuses such a service
+   * rather than declaring one path and writing another.
+   */
+  readonly storeDirectory?: string | undefined
 }
 
 /** @private */
@@ -464,6 +491,7 @@ interface NormalizedOptions {
   readonly environment: ReadonlyMap<string, string>
   readonly timeoutMs: number
   readonly executable: string | undefined
+  readonly storeDirectory: string | undefined
 }
 
 /**
@@ -477,7 +505,7 @@ const normalizeOptions = (value: Options, hostPlatform: Platform): NormalizedOpt
   const options = Validate.plainRecord(value, "package-manager options")
   Validate.exactKeys(
     options,
-    new Set(["projectRoot", "requirement", "environment", "timeoutMs", "executable"]),
+    new Set(["projectRoot", "requirement", "environment", "timeoutMs", "executable", "storeDirectory"]),
     "package-manager options"
   )
   const root = Validate.ownData(options, "projectRoot", "package-manager options")
@@ -537,6 +565,20 @@ const normalizeOptions = (value: Options, hostPlatform: Platform): NormalizedOpt
   ) {
     throw new TypeError("package-manager executable must be usable non-empty text")
   }
+  const store = Validate.ownData(options, "storeDirectory", "package-manager options")
+  if (
+    store !== undefined &&
+    (typeof store !== "string" || store.length === 0 || store.includes("\0") ||
+      !Validate.isWellFormedText(store) || Buffer.byteLength(store, "utf8") > 32 * 1024 ||
+      !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(store))
+  ) {
+    throw new TypeError("package-manager storeDirectory must be a usable absolute path")
+  }
+  // A store the project root contains is the default in disguise: it dies with
+  // the checkout, which is the reuse this option exists to restore.
+  if (store !== undefined && insideRoot(root, store)) {
+    throw new TypeError("package-manager storeDirectory must be outside the project root")
+  }
   const timeoutMs = timeoutOf(Validate.ownData(options, "timeoutMs", "package-manager options"))
   const normalizedPlatform = Object.freeze<Platform>({
     os: platform.os,
@@ -553,7 +595,8 @@ const normalizeOptions = (value: Options, hostPlatform: Platform): NormalizedOpt
       "package-manager environment"
     ),
     timeoutMs,
-    executable
+    executable,
+    storeDirectory: store
   })
 }
 
@@ -944,8 +987,14 @@ export const makePnpm = (options: Options): Effect.Effect<
     const environment = yield* Effect.cached(managerEnvironment(fs, normalized))
     const projectRoot = normalized.projectRoot
     const timeoutMs = normalized.timeoutMs
-    const storeDirectory = `${storeRoot}/pnpm`
-    const storeArgs = ["--store-dir", `${projectRoot}/${storeDirectory}`]
+    // A named host store is passed through as it stands; the default resolves
+    // against the project root, so the store the fetch boundary declares and
+    // the store the child writes are the same tree.
+    const storeDirectory = normalized.storeDirectory ?? `${storeRoot}/pnpm`
+    const storeArgs = [
+      "--store-dir",
+      normalized.storeDirectory ?? `${projectRoot}/${storeDirectory}`
+    ]
     const command = (args: ReadonlyArray<string>, output: "capture" | "inherit") =>
       Effect.gen(function*() {
         const env = yield* environment
@@ -1085,7 +1134,7 @@ export const makeNoop = (name: Name, options: Options, hostPlatform: Platform): 
   return Object.freeze({
     name,
     projectRoot: normalized.projectRoot,
-    storeDirectory: `${storeRoot}/${name}`,
+    storeDirectory: normalized.storeDirectory ?? `${storeRoot}/${name}`,
     lockfileName: lockfileNames[name],
     platformSensitive: true,
     requirement: normalized.requirement,

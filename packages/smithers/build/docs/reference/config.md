@@ -156,6 +156,13 @@ It does not control package-manager stores. Those stay at
 `TreeArtifact` boundary. The `install` verb therefore requires the default
 `.flows` setting; the other verbs accept a custom directory.
 
+A workspace-local store is not shared: each clone and worktree downloads and
+unpacks the whole dependency set and keeps its own copy, so an install cache
+holds one full store per checkout. `PackageManager.Options.storeDirectory`
+names an absolute host store outside the project root for a composition that
+drives the manager directly; the install Flow refuses it. See
+[Install](../concepts/install.md).
+
 ## Not key material
 
 The resolved directory is host state and never reaches a cache key or a content

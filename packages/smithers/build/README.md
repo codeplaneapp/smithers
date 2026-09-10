@@ -82,6 +82,14 @@ The install store is fixed at `.flows/store/pnpm`, so `install` requires the
 default `.flows` cache-directory configuration. Other CLI verbs may use a
 custom workspace-relative cache directory.
 
+A workspace-local store is not shared with any other checkout: each clone and
+worktree downloads and unpacks the whole dependency set and keeps its own copy,
+so size a CI install cache for one full store per checkout. A composition that
+drives `PackageManager` directly can pass `storeDirectory`, an absolute host
+path outside the project root, and get pnpm's shared store back; the install
+Flow refuses such a service because its fetch write declaration names the
+workspace-relative tree.
+
 ## Cache directory
 
 The workspace declaration says where target results and target scratch files

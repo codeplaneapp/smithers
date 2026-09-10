@@ -208,11 +208,14 @@ The pnpm commands are:
 
 ```text
 pnpm fetch --frozen-lockfile --ignore-scripts --reporter=append-only \
-  --store-dir <projectRoot>/.flows/store/pnpm
+  --store-dir <store>
 
 pnpm install --offline --frozen-lockfile --ignore-scripts \
-  --reporter=append-only --store-dir <projectRoot>/.flows/store/pnpm
+  --reporter=append-only --store-dir <store>
 ```
+
+`<store>` is `<projectRoot>/.flows/store/pnpm` unless the composition passed
+`storeDirectory`.
 
 `layerBun` and `layerNoop("bun", options, platform)` still provide the service
 shape. Version, fetch, link, and manifest operations fail with
@@ -240,6 +243,23 @@ receives its environment snapshot.
 
 Manager stores are fixed below `.flows/store/<manager>`. Discovery and glob
 expansion always exclude that tree.
+
+That placement costs reuse. pnpm's performance model is one machine-wide store
+that every project hardlinks from, so a second checkout of a workspace costs a
+link pass and no network. A store inside the workspace is owned by that
+workspace alone: every clone and every worktree downloads and unpacks the
+complete dependency set again and keeps its own copy, and a warm store
+elsewhere on the machine is not reused. Size a CI install cache for one full
+workspace store per checkout.
+
+`PackageManager.Options.storeDirectory` buys the shared store back for a
+composition that drives the manager directly. It is an absolute host path
+outside the project root, used for both fetch and the offline link, and
+`makeNoop` reports it too. It is rejected when it is relative, unusable, or
+inside the project root. The install Flow does not accept it: `executeFetch`
+checks the layer's store against `.flows/store/<manager>` and fails with
+`environment_mismatch` first, because the fetch write declaration names the
+workspace-relative tree and a file set has no host-path entry to name instead.
 
 Because the install action declaration contains that fixed path, the direct
 `install` command rejects a custom `cacheDirectory`. Other target verbs may use
