@@ -38,9 +38,12 @@ export const sections = (markdown: string) => {
   return result
 }
 
-export const operations = (options: { readonly root: string; readonly output: string }) => {
+export const operations = (options: { readonly root: string; readonly output: string; readonly fs?: FileSystem.FileSystem | undefined }) => {
+  // Native action execution may replace construction-time context services.
+  // A host-owned recipe can retain its explicitly injected filesystem here;
+  // canonical source/output boundaries below still apply to every operation.
   const read = (relative: string) => Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
+    const fs = options.fs ?? (yield* FileSystem.FileSystem), path = yield* Path.Path
     const root = yield* fs.realPath(options.root)
     const name = yield* Effect.try({ try: () => safePath(relative), catch: (error) => error as WikiError })
     const file = yield* fs.realPath(path.resolve(root, name))
@@ -89,7 +92,7 @@ export const operations = (options: { readonly root: string; readonly output: st
     return page
   })
   const write = (pages: readonly ReviewedPage[], mode: "preview" | "verified", provenance: Readonly<Record<string, Provenance>> = {}) => Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
+    const fs = options.fs ?? (yield* FileSystem.FileSystem), path = yield* Path.Path
     if (!pages.length || new Set(pages.map((page) => page.evidence.spec.id)).size !== pages.length) return yield* Effect.fail(fail("invalid-input", "Wiki page ids must be nonempty and unique"))
     const allIds = new Set(pages.map((page) => page.evidence.spec.id))
     for (const page of pages) {
@@ -161,7 +164,7 @@ export const operations = (options: { readonly root: string; readonly output: st
     return { schemaVersion: 1, sourceRevision, inputDigest, output: root, pages: pages.length, verification } satisfies Receipt
   })
   const check = (specs: readonly PageSpec[], requireVerified = false) => Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
+    const fs = options.fs ?? (yield* FileSystem.FileSystem), path = yield* Path.Path
     // A workspace root can have a logical OS alias (for example /var on
     // macOS). Compare immutable files under the same canonical output root
     // used by publication, while still refusing a linked output directory.

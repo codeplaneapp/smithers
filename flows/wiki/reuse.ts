@@ -65,10 +65,10 @@ const fail = (message: string) => new WikiError({ code: "review-failed", message
 const guarded = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.catch((error) =>
   Effect.fail(error instanceof WikiError ? error : fail(error instanceof Error ? error.message : String(error)))))
 
-export const reuseOperations = (options: { root: string; output: string }) => {
+export const reuseOperations = (options: { root: string; output: string; fs?: FileSystem.FileSystem | undefined }) => {
   const ops = operations(options)
   const policy = (reviewer: string) => Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
+    const fs = options.fs ?? (yield* FileSystem.FileSystem), path = yield* Path.Path
     const sources = yield* Effect.forEach(policySources, (file) => Effect.gen(function*() {
       const text = yield* fs.readFileString(path.resolve(options.root, file))
       if (new TextEncoder().encode(text).length > 512_000) return yield* Effect.fail(fail(`Review policy source is too large: ${file}`))
@@ -174,7 +174,7 @@ export const reuseOperations = (options: { root: string; output: string }) => {
       }))
     } }
 }
-export const reuseLayers = (options: { root: string; output: string }) => {
+export const reuseLayers = (options: { root: string; output: string; fs?: FileSystem.FileSystem | undefined }) => {
   const ops = reuseOperations(options)
   return Layer.mergeAll(Load.toLayer(ops.load), Select.toLayer(ops.select), Bind.toLayer(ops.bind), Publish.toLayer(ops.publish), Interpreter.layer(IncrementalWiki))
 }

@@ -56,12 +56,12 @@ const guarded = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.
 
 /** Reuse existing actions, journal, catalog and platform; the caller supplies the
  * authority-narrowed ReviewPage layer and existing planning/agent services. */
-export const planningWikiLayers = (options: PlanningWikiOptions) => Layer.mergeAll(
+export const planningWikiLayers = (options: PlanningWikiOptions, hostFilesystem?: FileSystem.FileSystem) => Layer.mergeAll(
   Interpreter.layer(PrepareWithWiki), Interpreter.layer(RefreshWiki), Interpreter.layer(Wiki),
-  actionLayers({ root: options.repositoryPath, output: options.wikiOutput }),
-  reuseLayers({ root: options.repositoryPath, output: options.wikiOutput }),
+  actionLayers({ root: options.repositoryPath, output: options.wikiOutput, fs: hostFilesystem }),
+  reuseLayers({ root: options.repositoryPath, output: options.wikiOutput, fs: hostFilesystem }),
   Configure.toLayer(() => guarded(Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
+    const fs = hostFilesystem ?? (yield* FileSystem.FileSystem), path = yield* Path.Path
     const input = yield* Schema.decodeUnknownEffect(WikiInput)({ pages: options.pages, mode: "verified", reviewer: options.reviewer })
     if (!input.reviewer.trim() || bytes(JSON.stringify(input)) > maximumCatalogBytes) return yield* fail("Wiki reviewer and catalog must fit 128 KiB")
     const sources = new Set(input.pages.flatMap(page => [page.document, ...page.inputs]))
@@ -110,7 +110,7 @@ export const planningWikiLayers = (options: PlanningWikiOptions) => Layer.mergeA
       ? runtime.execute(Wiki, { executionId: wikiRunId, payload: input })
       : runtime.execute(IncrementalWiki, { executionId: wikiRunId, payload: { ...input, priorRunId } }))
       .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Receipt)))
-    const fs = yield* FileSystem.FileSystem
+    const fs = hostFilesystem ?? (yield* FileSystem.FileSystem)
     const output = yield* fs.realPath(config.output)
     if (receipt.verification !== "verified" || receipt.output !== output || receipt.pages !== config.pages.length) {
       return yield* fail("Wiki generation did not return the configured verified publication", "review-failed")

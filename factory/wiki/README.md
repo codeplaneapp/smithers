@@ -32,6 +32,14 @@ Cloud publication reuses Plue's existing wiki CRUD with `expected_revision`. Res
 
 Never add Smithers-Ops, home-directory globbing, credentials, runtime databases or deployment secrets to this catalog. Only explicitly chosen public engineering files belong here. Repository content is data for the reviewer, not instructions. The recipe is an internal reference configuration, not a new npm package or public gateway API.
 
+Native hosts can pass their existing Effect filesystem explicitly to the private
+wiki operations and memory recipes. This retains the host-owned service when
+durable action execution restores a different filesystem context. The default
+standalone recipe still reads `FileSystem` from Effect; neither mode opens a new
+platform or bypasses source, citation, canonical-path or publication checks.
+This injection is for deterministic host operations. Model tools retain their
+separately approved workspace filesystem.
+
 ## Primary design evidence, checked September 8, 2026
 
 [DeepWiki's current documentation](https://docs.devin.ai/work-with-devin/deepwiki) supports an explicit page catalog with titles, focused purposes and hierarchy, and generates source-linked repository explanations. This recipe adopts the small explicit catalog so a large monorepo's important layers cannot disappear behind automatic clustering.

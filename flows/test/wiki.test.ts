@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, realpath, symlink } from "node
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { NodeServices } from "@effect/platform-node"
-import { Effect, Schema } from "effect"
+import { Effect, FileSystem, Schema } from "effect"
 import { operations } from "../wiki/operations.ts"
 import { reviewEvidence } from "../wiki/evidence.ts"
 import { PageSpec, type ReviewedPage, type Review } from "../wiki/schema.ts"
@@ -21,6 +21,19 @@ const fixture = async (t: TestContext) => {
 }
 const run = <A, E>(effect: Effect.Effect<A, E, import("effect/FileSystem").FileSystem | import("effect/Path").Path | import("effect/Crypto").Crypto>) => Effect.runPromise(effect.pipe(Effect.provide(NodeServices.layer)))
 const supported = (evidence: ReviewedPage["evidence"]): Review => ({ sections: evidence.sections.map((section) => ({ id: section.id, verdict: "supported", explanation: "The exported constant supports the explanation.", citations: [{ path: "src/answer.ts", line: 1, quote: "export const answer = 42" }] })) })
+
+test("host-owned wiki operations retain their injected filesystem under a different action context", async t => {
+  const f = await fixture(t), fs = await run(FileSystem.FileSystem)
+  const ops = operations({ root: f.root, output: f.output, fs })
+  const context = FileSystem.makeNoop({})
+  const evidence = await run(ops.collect(f.spec).pipe(Effect.provideService(FileSystem.FileSystem, context)))
+  await run(ops.write([{ evidence, review: supported(evidence), reviewer: "scripted-host" }], "verified")
+    .pipe(Effect.provideService(FileSystem.FileSystem, context)))
+  assert.equal((await run(ops.check([f.spec], true).pipe(Effect.provideService(FileSystem.FileSystem, context)))).verification, "verified")
+  await assert.rejects(run(f.ops.collect(f.spec).pipe(Effect.provideService(FileSystem.FileSystem, context))))
+  await symlink("/etc/hosts", join(f.root, "outside"))
+  await assert.rejects(run(ops.collect({ ...f.spec, inputs: ["outside"] })), /Source escapes/)
+})
 
 test("both owning prose and code invalidate a source snapshot; no input is truncated", async (t) => {
   const f = await fixture(t), before = await run(f.ops.collect(f.spec))

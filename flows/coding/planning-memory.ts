@@ -35,12 +35,12 @@ const failure = (message: string) => new CodingError({ code: "stale_revision", m
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length
 
 /** No model or database participates in selecting and identifying source facts. */
-export const gather = (options: MemoryOptions, input: typeof PlanningInput.Type) => Effect.gen(function*() {
+export const gather = (options: MemoryOptions, input: typeof PlanningInput.Type, hostFilesystem?: FileSystem.FileSystem) => Effect.gen(function*() {
   const limit = options.historyLimit ?? 100, maximum = options.maxMemoryBytes ?? 48 * 1024
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(maximum) || maximum < 1024 || maximum > 90 * 1024) {
     return yield* failure("Planning memory requires historyLimit 1..100 and maxMemoryBytes 1024..92160")
   }
-  const fs = yield* FileSystem.FileSystem, path = yield* Path.Path
+  const fs = hostFilesystem ?? (yield* FileSystem.FileSystem), path = yield* Path.Path
   const native = yield* NativeCoding, jj = yield* Jj.Jj
   // The configured Jj captures current bytes in the SAME native atom. It never
   // opens a new change merely because memory needs an immutable code identity.
@@ -54,7 +54,7 @@ export const gather = (options: MemoryOptions, input: typeof PlanningInput.Type)
   const captured = yield* fs.readFileString(pointer)
   // Use the owning verifier. Digest equality alone does not prove semantic
   // review, nor may old generated explanations silently stand in for new code.
-  yield* wikiOperations({ root: options.repositoryPath, output: options.wikiOutput }).check(options.pages, true)
+  yield* wikiOperations({ root: options.repositoryPath, output: options.wikiOutput, fs: hostFilesystem }).check(options.pages, true)
   if ((yield* fs.readFileString(pointer)) !== captured) return yield* failure("Wiki publication changed while gathering memory; retry gathering")
   const wiki = yield* Effect.try({ try: () => JSON.parse(captured) as unknown, catch: () => failure("Invalid verified wiki pointer") }).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(Pointer)),
@@ -105,9 +105,11 @@ export const gather = (options: MemoryOptions, input: typeof PlanningInput.Type)
   "Planning memory is unavailable or source-stale: " + (error instanceof Error ? error.message : String(error))
 )))
 
-/** The caller supplies existing host services; no storage or platform is opened. */
-export const memoryLayer = (options: MemoryOptions) => Layer.mergeAll(
-  GatherContext.toLayer(input => gather(options, input)),
+/** The caller supplies existing host services; no storage or platform is opened.
+ * Explicit host filesystem injection survives native action context restoration.
+ */
+export const memoryLayer = (options: MemoryOptions, hostFilesystem?: FileSystem.FileSystem) => Layer.mergeAll(
+  GatherContext.toLayer(input => gather(options, input, hostFilesystem)),
   VerifyContext.toLayer(({ context }) => Effect.gen(function*() {
     const jj = yield* Jj.Jj, native = yield* NativeCoding
     yield* jj.snapshot("coding planning freshness")
@@ -117,7 +119,7 @@ export const memoryLayer = (options: MemoryOptions) => Layer.mergeAll(
           const actual = current.revisions.find(value => value.changeId === row.changeId)
           return !actual || actual.kind !== "resolved" || !sameCode(row, actual)
         })) return yield* failure("Native code changed during planning or clarification; gather and plan again")
-    yield* wikiOperations({ root: options.repositoryPath, output: options.wikiOutput }).check(options.pages, true)
+    yield* wikiOperations({ root: options.repositoryPath, output: options.wikiOutput, fs: hostFilesystem }).check(options.pages, true)
     return context
   }).pipe(Effect.mapError(error => error instanceof CodingError ? error : failure(
     "Planning context no longer matches current source: " + (error instanceof Error ? error.message : String(error))
