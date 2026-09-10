@@ -132,9 +132,12 @@ const stopTasks = (options: AwsSandboxOptions, taskArns: ReadonlyArray<string>):
 /** A machine a previous acquire of this session key left behind. */
 interface Leftover {
   readonly taskArn: string
+  readonly taskDefinitionArn: string
   /** Whether its ECS Exec agent already answers, or the adopter must wait for it. */
   readonly ready: boolean
 }
+
+const definitionFamilyOf = (arn: string): string => arn.slice(arn.lastIndexOf("/") + 1).replace(/:\d+$/, "")
 
 /**
  * The task a previous acquire of this session key left behind, if any, plus
@@ -181,15 +184,18 @@ const leftoverTasks = (
       if (task?.lastStatus === "STOPPED") continue
       const definition = options.taskDefinition
       if (
-        task === undefined || task.startedBy !== startedBy ||
+        task === undefined || task.taskDefinitionArn === undefined || task.startedBy !== startedBy ||
         !task.tags?.some((tag) => tag.key === fingerprintTag && tag.value === fingerprint) ||
+        (definition === undefined &&
+          (!/:\d+$/.test(task.taskDefinitionArn) ||
+            definitionFamilyOf(task.taskDefinitionArn) !== `smthrs-${startedBy}`)) ||
         (definition !== undefined && (!/:\d+$/.test(definition) ||
           !(task.taskDefinitionArn === definition ||
-            (!definition.startsWith("arn:") && task.taskDefinitionArn?.endsWith(`/${definition}`)))))
+            (!definition.startsWith("arn:") && task.taskDefinitionArn.endsWith(`/${definition}`)))))
       ) {
         return yield* Effect.fail(failure("unavailable", `${arn} does not match the requested configuration or owner`))
       }
-      live.push({ taskArn: arn, ready: agentReady(task, container) })
+      live.push({ taskArn: arn, taskDefinitionArn: task.taskDefinitionArn, ready: agentReady(task, container) })
     }
     live.sort((left, right) => left.taskArn.localeCompare(right.taskArn))
     const [first, ...rest] = live
@@ -222,10 +228,9 @@ const registeredArnOf = (output: RegisterTaskDefinitionOutput): string | undefin
 
 const deregisterDefinition = (
   options: AwsSandboxImageOptions,
-  output: RegisterTaskDefinitionOutput
-): Effect.Effect<void> => {
-  const taskDefinition = registeredArnOf(output)
-  return taskDefinition === undefined
+  taskDefinition: string | undefined
+): Effect.Effect<void> =>
+  taskDefinition === undefined
     ? Effect.void
     : finalizeWithin(
       Effect.ignore(
@@ -237,7 +242,35 @@ const deregisterDefinition = (
       ),
       `aws task definition ${taskDefinition}`
     )
-}
+
+/** Reclaim older crash-left registrations without touching the adopted revision. */
+const deregisterStaleDefinitions = (
+  options: AwsSandboxImageOptions,
+  startedBy: string,
+  adopted: string
+): Effect.Effect<void, ProviderError> =>
+  Effect.gen(function*() {
+    const family = `smthrs-${startedBy}`
+    let nextToken: string | undefined
+    do {
+      const listed = yield* attempt(
+        () =>
+          options.sdk.listTaskDefinitions({
+            familyPrefix: family,
+            status: "ACTIVE",
+            ...nextToken === undefined ? {} : { nextToken }
+          }),
+        "unavailable",
+        `could not list task definitions for ${family}`
+      )
+      for (const arn of listed.taskDefinitionArns ?? []) {
+        if (arn !== adopted && definitionFamilyOf(arn) === family) {
+          yield* deregisterDefinition(options, arn)
+        }
+      }
+      nextToken = listed.nextToken
+    } while (nextToken !== undefined)
+  })
 
 const agentReady = (task: Task, container: string | undefined): boolean =>
   task.lastStatus === "RUNNING" &&
@@ -317,7 +350,7 @@ const registerDefinition = (
         "unavailable",
         `could not register ${options.image}`
       ),
-      (output) => deregisterDefinition(options, output)
+      (output) => deregisterDefinition(options, registeredArnOf(output))
     )
     const taskDefinition = registeredArnOf(output)
     return taskDefinition === undefined
@@ -504,8 +537,9 @@ const spawnScript = (
  *
  * Acquisition uses `RunTask`, polls `DescribeTasks` until the ECS Exec managed
  * agent is ready, and registers `StopTask` on the acquiring scope. Supplying
- * an image registers a minimal Fargate task definition and deregisters it after
- * the task finalizer runs.
+ * an image registers a minimal Fargate task definition for a fresh task or
+ * reuses an adopted task’s definition, deregistering it after the task finalizer
+ * runs. Image recovery also deregisters stale ACTIVE revisions of its family.
  *
  * Commands, reads, and writes travel through {@link ExecTransport}: the AWS
  * CLI and its Session Manager plugin over an injected spawner, because the ECS
@@ -522,6 +556,9 @@ const spawnScript = (
 export const make = (options: AwsSandboxOptions): Provider => ({
   acquire: (sessionKey) =>
     Effect.gen(function*() {
+      if (options.taskDefinition !== undefined && options.env !== undefined && options.container === undefined) {
+        return yield* Effect.fail(failure("spawn_error", "env overrides for a taskDefinition require a container name"))
+      }
       const workdir = options.workdir ?? "/workspace"
       const startedBy = startedByOf(sessionKey)
       const { sdk: _sdk, exec: _exec, pollIntervalMs: _poll, maxPollAttempts: _attempts, ...configuration } = options
@@ -530,17 +567,8 @@ export const make = (options: AwsSandboxOptions): Provider => ({
         provider: "AwsSandbox/v1",
         owner: sessionKey
       })
-      const generatedContainer = options.container ?? "sandbox"
-      let imageOptions: AwsSandboxImageOptions | undefined
-      let taskDefinition: string
-      if (options.taskDefinition === undefined) {
-        imageOptions = options
-        taskDefinition = yield* registerDefinition(options, startedBy, workdir, generatedContainer)
-      } else {
-        imageOptions = undefined
-        taskDefinition = options.taskDefinition
-      }
-      const container = options.container ?? (imageOptions === undefined ? undefined : generatedContainer)
+      const imageOptions = options.taskDefinition === undefined ? options : undefined
+      const container = options.container ?? (imageOptions === undefined ? undefined : "sandbox")
       // Reattach before provisioning: the same key names the same machine
       // wherever one is still running. An adopted task is released the same
       // way a fresh one is, so closing the scope attempts to stop either.
@@ -553,14 +581,27 @@ export const make = (options: AwsSandboxOptions): Provider => ({
         ? yield* Effect.gen(function*() {
           const arn = yield* Effect.acquireRelease(
             Effect.succeed(adopt.taskArn),
-            (task) => stopTasks(options, [task])
+            (task) =>
+              stopTasks(options, [task]).pipe(
+                Effect.andThen(
+                  imageOptions === undefined
+                    ? Effect.void
+                    : deregisterDefinition(imageOptions, adopt.taskDefinitionArn)
+                )
+              )
           )
+          if (imageOptions !== undefined) {
+            yield* deregisterStaleDefinitions(imageOptions, startedBy, adopt.taskDefinitionArn)
+          }
           // A task adopted while still provisioning is released by the same
           // finalizer whether or not it ever becomes ready.
           if (!adopt.ready) yield* awaitReady(options, arn, container)
           return arn
         })
         : yield* Effect.gen(function*() {
+          const taskDefinition = options.taskDefinition === undefined
+            ? yield* registerDefinition(options, startedBy, workdir, options.container ?? "sandbox")
+            : options.taskDefinition
           const output = yield* Effect.acquireRelease(
             runTask(options, taskDefinition, startedBy, container, fingerprint),
             (output) => stopTasks(options, taskArnsOf(output))

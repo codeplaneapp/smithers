@@ -242,6 +242,9 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
         }
       }
   },
+  async listTaskDefinitions() {
+    return {}
+  },
   async deregisterTaskDefinition(input) {
     fake.deregisterInputs.push(input)
     fake.events.push("deregister")
@@ -578,6 +581,132 @@ describe("AwsSandbox", () => {
       }
     }))
 
+  it.effect("refuses task-definition environment overrides without a container before SDK calls", () =>
+    Effect.gen(function*() {
+      const fake = fakeEcs()
+      const error = yield* Effect.flip(Effect.scoped(
+        taskDefinitionProvider(fake, { env: { BOOT: "yes" } }).acquire("missing-container")
+      ))
+      expect(error).toBeInstanceOf(ProviderError)
+      expect(error).toMatchObject({ code: "spawn_error" })
+      expect(error.message).toContain("container")
+      expect(fake.events).toEqual([])
+    }))
+
+  it.effect("keeps long session keys sharing a prefix on separate tasks", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const fake = fakeEcs()
+      const provider = taskDefinitionProvider(fake)
+      const prefix = "flow:0f3c2b1a-7d6e-4f5a-9b8c-1d2e3f4a5b6c:"
+      const first = yield* provider.acquire(`${prefix}lane-1`)
+      const second = yield* provider.acquire(`${prefix}lane-2`)
+      expect(first.remoteId).not.toBe(second.remoteId)
+      expect(fake.runInputs).toHaveLength(2)
+      expect(fake.runInputs.map((input) => input.startedBy)).toEqual([
+        "flow-0f3c2b1a-7d6e--5869781b6e6d1d39",
+        "flow-0f3c2b1a-7d6e--5869781c6b6d1880"
+      ])
+    })))
+
+  it.effect("reuses a crash-left image definition and reclaims its stale revisions", () =>
+    Effect.gen(function*() {
+      const fake = fakeEcs()
+      const leaked = yield* Scope.make()
+      const listInputs: Array<{ familyPrefix: string; status: "ACTIVE"; nextToken?: string | undefined }> = []
+      let original = ""
+      const sdk = {
+        ...sdkOf(fake),
+        async listTaskDefinitions(input: typeof listInputs[number]) {
+          listInputs.push(input)
+          return input.nextToken === undefined
+            ? { taskDefinitionArns: [original, original.replace(/:1$/, ":2")], nextToken: "next" }
+            : { taskDefinitionArns: [original.replace(/:1$/, ":3"), original.replace(/:1$/, "-other:1")] }
+        }
+      }
+      const provider = AwsSandbox.make({
+        sdk,
+        image: "img",
+        taskRoleArn: "role",
+        cluster: "cluster-arn",
+        region: "us-west-2",
+        subnets: ["subnet-a"]
+      })
+      const first = yield* Effect.provideService(provider.acquire("image-recovery"), Scope.Scope, leaked)
+      original = fake.runInputs[0]!.taskDefinition
+      yield* Effect.scoped(Effect.gen(function*() {
+        const second = yield* provider.acquire("image-recovery")
+        expect(second.remoteId).toBe(first.remoteId)
+        expect(fake.runInputs).toHaveLength(1)
+        expect(fake.registerInputs).toHaveLength(1)
+        expect(fake.deregisterInputs).toEqual([
+          { taskDefinition: original.replace(/:1$/, ":2") },
+          { taskDefinition: original.replace(/:1$/, ":3") }
+        ])
+      }))
+      expect(listInputs).toEqual([
+        { familyPrefix: fake.registerInputs[0]!.family, status: "ACTIVE" },
+        { familyPrefix: fake.registerInputs[0]!.family, status: "ACTIVE", nextToken: "next" }
+      ])
+      expect(fake.deregisterInputs.at(-1)).toEqual({ taskDefinition: original })
+      expect(fake.events.slice(-2)).toEqual(["stop", "deregister"])
+      expect(fake.events.indexOf("list")).toBeLessThan(fake.events.indexOf("register"))
+      yield* Scope.close(leaked, Exit.void)
+    }))
+
+  it.effect("refuses image recovery without a definition in its generated family", () =>
+    Effect.gen(function*() {
+      for (const definition of [undefined, "arn:aws:ecs:us-west-2:123:task-definition/unrelated:1", "unversioned"]) {
+        const fake = fakeEcs()
+        const leaked = yield* Scope.make()
+        const provider = AwsSandbox.make({
+          sdk: sdkOf(fake),
+          image: "img",
+          taskRoleArn: "role",
+          cluster: "cluster-arn",
+          region: "us-west-2",
+          subnets: ["subnet-a"]
+        })
+        yield* Effect.provideService(provider.acquire("image-identity"), Scope.Scope, leaked)
+        fake.running[0]!.taskDefinition = definition
+        expect(yield* Effect.flip(Effect.scoped(provider.acquire("image-identity")))).toMatchObject({
+          code: "unavailable"
+        })
+        expect(fake.registerInputs).toHaveLength(1)
+        expect(fake.stopInputs).toHaveLength(0)
+        expect(fake.deregisterInputs).toHaveLength(0)
+        yield* Scope.close(leaked, Exit.void)
+      }
+    }))
+
+  it.effect("releases the adopted image task and definition when revision listing fails", () =>
+    Effect.gen(function*() {
+      const fake = fakeEcs()
+      const leaked = yield* Scope.make()
+      const sdk = {
+        ...sdkOf(fake),
+        async listTaskDefinitions() {
+          throw new Error("list denied")
+        }
+      }
+      const provider = AwsSandbox.make({
+        sdk,
+        image: "img",
+        taskRoleArn: "role",
+        cluster: "cluster-arn",
+        region: "us-west-2",
+        subnets: ["subnet-a"]
+      })
+      yield* Effect.provideService(provider.acquire("image-list-failure"), Scope.Scope, leaked)
+      const original = fake.runInputs[0]!.taskDefinition
+      expect(yield* Effect.flip(Effect.scoped(provider.acquire("image-list-failure")))).toMatchObject({
+        code: "unavailable"
+      })
+      expect(fake.registerInputs).toHaveLength(1)
+      expect(fake.events.slice(-2)).toEqual(["stop", "deregister"])
+      expect(fake.deregisterInputs).toEqual([{ taskDefinition: original }])
+      yield* Scope.close(leaked, Exit.void)
+    }))
+
   it.effect("reattaches matching generated definitions and revision-qualified task ARNs", () =>
     Effect.gen(function*() {
       for (const generated of [false, true]) {
@@ -725,7 +854,7 @@ describe("AwsSandbox", () => {
         count: 1,
         enableExecuteCommand: true,
         launchType: "FARGATE",
-        startedBy: expect.stringMatching(/^[A-Za-z0-9/_-]{1,36}$/),
+        startedBy: "------this-is-a-ver-65f8abebacfab7cd",
         platformVersion: "1.4.0",
         networkConfiguration: {
           awsvpcConfiguration: {

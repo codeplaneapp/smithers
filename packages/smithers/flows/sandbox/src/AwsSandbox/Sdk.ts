@@ -128,6 +128,17 @@ interface RegisterTaskDefinitionOutput {
   } | undefined
 }
 
+interface ListTaskDefinitionsInput {
+  readonly familyPrefix: string
+  readonly status: "ACTIVE"
+  readonly nextToken?: string | undefined
+}
+
+interface ListTaskDefinitionsOutput {
+  readonly taskDefinitionArns?: ReadonlyArray<string> | undefined
+  readonly nextToken?: string | undefined
+}
+
 interface DeregisterTaskDefinitionInput {
   readonly taskDefinition: string
 }
@@ -150,5 +161,6 @@ export interface Sdk {
   readonly registerTaskDefinition: (
     input: RegisterTaskDefinitionInput
   ) => Promise<RegisterTaskDefinitionOutput>
+  readonly listTaskDefinitions: (input: ListTaskDefinitionsInput) => Promise<ListTaskDefinitionsOutput>
   readonly deregisterTaskDefinition: (input: DeregisterTaskDefinitionInput) => Promise<unknown>
 }
