@@ -3,6 +3,7 @@ import { extractDiffAssets } from "../diffs/extractDiffAssets.ts";
 import { renderFallbackDiffHtml } from "../diffs/renderFallbackDiffHtml.ts";
 import { renderPierreFileDiff } from "../diffs/renderPierreFileDiff.ts";
 import type { Quiz } from "../quiz/quizSchema.ts";
+import type { ReviewOutcome } from "./reviewOutcome.ts";
 import type { ChangedFile } from "./changedFileSchema.ts";
 import { describeChange } from "./describeChange.ts";
 import { escapeHtml } from "./escapeHtml.ts";
@@ -91,6 +92,7 @@ function diffSection(
   findings: Array<{ comment: ReviewComment; id: string }>,
   anchor: string,
   render: DiffRender,
+  outcome?: ReviewOutcome["files"][number],
 ): string {
   const open = file.insertions + file.deletions <= OPEN_DIFF_MAX_CHURN;
   const rename = renamePaths(file);
@@ -101,8 +103,9 @@ function diffSection(
     render.note !== ""
       ? `<span class="badge plain-render" title="${render.note === "oversize" ? "The diff is too large for the highlighted renderer." : "The highlighted renderer failed for this diff."}">plain rendering (${render.note === "oversize" ? "large diff" : "renderer failed"})</span>`
       : "";
-  const notReviewed =
-    !file.reviewed && file.excludeReason
+  const notReviewed = outcome?.status === "not_reviewed"
+    ? `<span class="not-reviewed" title="${escapeHtml(outcome.reason)}">not reviewed · ${escapeHtml(humanizeExcludeReason(outcome.reason))}</span>`
+    : !file.reviewed && file.excludeReason
       ? `<span class="not-reviewed" title="${escapeHtml(file.excludeReason)}">not agent-reviewed · ${escapeHtml(humanizeExcludeReason(file.excludeReason))}</span>`
       : "";
   const head = [
@@ -190,8 +193,10 @@ async function renderDiffBodies(
   return { renders, sprite, styles: [...styles] };
 }
 
-function findingsChip(comments: ReviewComment[]): string {
-  if (comments.length === 0) return `<span class="chip">findings <strong>0</strong></span>`;
+function findingsChip(comments: ReviewComment[], incomplete: boolean): string {
+  if (comments.length === 0) return incomplete
+    ? `<span class="chip">findings <strong>unavailable or incomplete</strong></span>`
+    : `<span class="chip">findings <strong>0</strong></span>`;
   const counts = new Map<string, number>();
   for (const comment of comments) {
     const severity = severityOf(comment);
@@ -202,6 +207,20 @@ function findingsChip(comments: ReviewComment[]): string {
     .map((severity) => `<span class="sev-count sev-${severity}">${counts.get(severity)} ${severity}</span>`)
     .join(" · ");
   return `<span class="chip">${pluralize(comments.length, "finding")}: ${breakdown}</span>`;
+}
+
+function reviewNotice(outcome: ReviewOutcome | undefined): string {
+  if (!outcome) return "";
+  const title = outcome.status === "failed" ? "Review failed"
+    : outcome.status === "skipped" ? "Review skipped"
+    : outcome.status !== "success" ? "Review incomplete or completed with warnings"
+    : outcome.warnings.length > 0 ? "Review warnings"
+    : "Review completed";
+  const incomplete = outcome.status !== "success" || outcome.warnings.length > 0;
+  const warnings = outcome.warnings.map((warning) =>
+    `<li><strong>${escapeHtml(warning.type)}</strong>${warning.file ? ` · <code>${escapeHtml(warning.file)}</code>` : ""}: ${escapeHtml(warning.message)}</li>`
+  ).join("");
+  return `<section class="panel review-outcome" data-review-status="${escapeHtml(outcome.status)}" role="status"><h2>${title}</h2>${incomplete ? "<p>Findings may be incomplete or unverified. This walkthrough does not establish a clean review.</p>" : ""}${warnings ? `<ul>${warnings}</ul>` : ""}</section>`;
 }
 
 function findingsIndexSection(
@@ -300,6 +319,7 @@ export async function renderWalkthroughHtml(opts: {
   story: Story;
   files: ChangedFile[];
   comments: ReviewComment[];
+  outcome?: ReviewOutcome;
   repoDir: string;
   mode: string;
   ref: string;
@@ -309,6 +329,7 @@ export async function renderWalkthroughHtml(opts: {
   impact?: WalkthroughImpact | null;
 }): Promise<string> {
   const { story, files, comments } = opts;
+  const outcomeByPath = new Map(opts.outcome?.files.map((file) => [file.path, file]));
   const title = opts.title.trim() || story.headline || "Change walkthrough";
   const fileByPath = new Map(files.map((file) => [file.path, file]));
   const anchorByPath = new Map(files.map((file, index) => [file.path, `file-${index + 1}`]));
@@ -353,7 +374,7 @@ export async function renderWalkthroughHtml(opts: {
     `<span class="chip"><strong>${escapeHtml(pluralize(files.length, "file"))}</strong></span>`,
     `<span class="chip add"><strong>+${totalInsertions}</strong></span>`,
     `<span class="chip del"><strong>−${totalDeletions}</strong></span>`,
-    findingsChip(comments),
+    findingsChip(comments, opts.outcome !== undefined && (opts.outcome.status !== "success" || opts.outcome.warnings.length > 0)),
     impactChip,
     `<span class="chip" title="${escapeHtml(opts.generatedAt)}">generated <strong>${escapeHtml(formatUtcTimestamp(opts.generatedAt))}</strong></span>`,
   ].join("");
@@ -382,6 +403,7 @@ export async function renderWalkthroughHtml(opts: {
               commentsByPath.get(block.path) ?? [],
               anchorByPath.get(block.path) ?? "",
               renders.get(block.path) ?? { body: renderFallbackDiffHtml(file.diff), renderer: "fallback", note: "" },
+              outcomeByPath.get(block.path),
             );
           }
           if (block.kind === "diagram") {
@@ -458,6 +480,7 @@ export async function renderWalkthroughHtml(opts: {
     renderOverviewChart(files),
     `<div class="meta">${chips}<span class="controls"><button id="expand-all" type="button">Expand all diffs</button><button id="collapse-all" type="button">Collapse all diffs</button></span></div>`,
     `</header>`,
+    reviewNotice(opts.outcome),
     mobileToc,
     findingsIndex,
     quizSection,

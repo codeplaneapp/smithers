@@ -127,8 +127,13 @@ export const VerifyReview = Flow.make("smithers-review/VerifyReview", {
       return NarrateReview.to({ input, target, changes, review });
     }
     return VerifyFindings.call({ findings: review.comments, files: changes.files, timeout: input.timeout }).pipe(
-      Node.catch({ onFailure: () => Node.succeed(null) }),
-      Node.bindPlanned((verdicts) => ApplyVerdicts.call({ review, verdicts })),
+      Node.map((verdicts) => ({ verdicts, failure: "" })),
+      Node.catch({
+        onFailure: (error) => Node.succeed(error).pipe(
+          Node.map((failure) => ({ verdicts: null, failure: failure.message })),
+        ),
+      }),
+      Node.bindPlanned(({ verdicts, failure }) => ApplyVerdicts.call({ review, verdicts, failure })),
       Node.bindPlanned((verified) => NarrateReview.to({ input, target, changes, review: verified })),
     );
   },

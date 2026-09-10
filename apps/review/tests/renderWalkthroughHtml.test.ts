@@ -247,3 +247,23 @@ describe("renderWalkthroughHtml", () => {
     expect(html).toContain("No changes detected");
   });
 });
+
+// Extra outcome data is deliberately passed through a variable so these tests
+// exercise the old renderer's lossy projection before the option exists.
+for (const status of ["failed", "completed_with_warnings", "skipped"] as const) {
+  test(`renders ${status} distinctly from a clean zero-findings review`, async () => {
+    const base = { title: "", story, files, comments: [], repoDir: "/tmp/repo", mode: "workspace", ref: "workspace", generatedAt: "2026-06-10T00:00:00.000Z" };
+    const clean = await renderWalkthroughHtml(base);
+    const options = { ...base, outcome: {
+      status,
+      files: [{ path: "src/a.ts", status: "not_reviewed" as const, reason: "review failed" }],
+      warnings: [{ file: "src/a.ts", type: "subtask_error", message: "seat failed <script>" }],
+    } };
+    const html = await renderWalkthroughHtml(options);
+    expect(html).not.toBe(clean);
+    expect(html).toContain(status === "failed" ? "Review failed" : status === "skipped" ? "Review skipped" : "Review incomplete or completed with warnings");
+    expect(html).toContain("not reviewed");
+    expect(html).toContain("seat failed &lt;script&gt;");
+    expect(html).not.toContain('findings <strong>0</strong>');
+  });
+}

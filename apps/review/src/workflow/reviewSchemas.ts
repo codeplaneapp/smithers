@@ -145,6 +145,7 @@ export const NarrateReviewPayload = VerifyReviewPayload;
  */
 export const WalkthroughOutput = Schema.Struct({
   path: Schema.String,
+  artifactPath: withDefault(Schema.String, ""),
   bytes: Schema.Number,
   chapters: Schema.Number,
   files: Schema.Number,

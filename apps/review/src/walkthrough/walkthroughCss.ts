@@ -86,6 +86,9 @@ header.page .synopsis { margin: 0; color: var(--muted); max-width: 72ch; font-si
 
 /* ---- shared panels / chapters ---- */
 section.panel, section.chapter { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-card); padding: 22px 30px; margin-bottom: 24px; }
+section.review-outcome { border-left: 4px solid var(--warning); }
+section.review-outcome[data-review-status="failed"] { border-left-color: var(--danger); }
+section.review-outcome[data-review-status="success"] { border-left-color: var(--success); }
 section.panel h2, section.chapter > h2 { margin: 0 0 14px; font-size: 21px; font-weight: 650; letter-spacing: -0.01em; }
 section.chapter > h2 .num { color: var(--faint); font-weight: 500; font-size: 13px; letter-spacing: .05em; margin-right: 10px; font-variant-numeric: tabular-nums; vertical-align: 3px; }
 .anchor-link { color: var(--faint); font-weight: 400; margin-left: 8px; opacity: 0; transition: opacity 120ms; }

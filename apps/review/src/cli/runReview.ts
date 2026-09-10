@@ -8,6 +8,7 @@
  *
  * @since 1.0.0
  */
+import { randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -157,7 +158,7 @@ export async function runReview(args: ReviewArgs): Promise<void> {
     }
   }
 
-  const runId = `review-${Date.now()}`;
+  const runId = `review-${Date.now()}-${randomUUID()}`;
   const input = {
     repo: repoDir,
     from: args.from,
@@ -218,13 +219,17 @@ export async function runReview(args: ReviewArgs): Promise<void> {
       `[smithers-review] ⚠️ review completed with warnings${failedFileReviews > 0 ? ` (${failedFileReviews} file review${failedFileReviews === 1 ? "" : "s"} failed)` : ""}; findings may be incomplete.`,
     );
   }
+  for (const warning of warnings) {
+    console.error(`[smithers-review] warning [${warning.type}]${warning.file ? ` ${warning.file}:` : ""} ${warning.message}`);
+  }
   console.log(walkthrough.message || `Walkthrough written to ${walkthrough.path}`);
 
   let publishError = "";
   let shareUrl = "";
   if (args.publish) {
     try {
-      shareUrl = await publishWalkthrough(walkthrough.path);
+      if (!walkthrough.artifactPath) throw new Error("this review has no execution-specific walkthrough artifact; rerun to publish");
+      shareUrl = await publishWalkthrough(walkthrough.artifactPath);
       console.log(`Published: ${shareUrl}`);
     } catch (error) {
       // Publishing is best-effort: the review already exists locally (and on
@@ -317,6 +322,8 @@ export async function runReview(args: ReviewArgs): Promise<void> {
           inline: inlinePosted,
           severity: severityCounts(findings),
           walkthroughPath: walkthrough.path,
+          walkthroughArtifactPath: walkthrough.artifactPath,
+          warnings,
           walkthroughUrl: shareUrl,
           publishError,
           failedFileReviews,

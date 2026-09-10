@@ -11,8 +11,7 @@
 import { Action } from "@smthrs/flow";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { assessChangeImpact } from "../quiz/assessChangeImpact.ts";
 import { normalizeQuiz } from "../quiz/normalizeQuiz.ts";
 import { Quiz } from "../quiz/quizSchema.ts";
@@ -21,6 +20,7 @@ import { Changes } from "../walkthrough/changesSchema.ts";
 import { collectChanges } from "../walkthrough/collectChanges.ts";
 import { normalizeStory } from "../walkthrough/normalizeStory.ts";
 import { renderWalkthroughHtml } from "../walkthrough/renderWalkthroughHtml.ts";
+import { writeWalkthroughArtifact } from "../walkthrough/writeWalkthroughArtifact.ts";
 import { Story } from "../walkthrough/storySchema.ts";
 import { applyFindingVerdicts } from "./applyFindingVerdicts.ts";
 import {
@@ -39,6 +39,7 @@ import {
   PreparedReview,
   WalkthroughOutput,
 } from "./reviewSchemas.ts";
+import { SEAT } from "./reviewSeats.ts";
 import { VerifyVerdicts } from "./verifyVerdictsSchema.ts";
 
 /**
@@ -174,7 +175,11 @@ export const finalizeReviewLayer = FinalizeReview.toLayer(({ input, outcomes, pr
  * @category actions
  */
 export const ApplyVerdicts = Action.make("smithers-review/ApplyVerdicts", {
-  payload: { review: ReviewRunOutput, verdicts: Schema.NullOr(VerifyVerdicts) },
+  payload: {
+    review: ReviewRunOutput,
+    verdicts: Schema.NullOr(VerifyVerdicts),
+    failure: Schema.optional(Schema.String),
+  },
   success: ReviewRunOutput,
 });
 
@@ -184,17 +189,18 @@ export const ApplyVerdicts = Action.make("smithers-review/ApplyVerdicts", {
  * @since 1.0.0
  * @category layers
  */
-export const applyVerdictsLayer = ApplyVerdicts.toLayer(({ review, verdicts }) =>
+export const applyVerdictsLayer = ApplyVerdicts.toLayer(({ review, verdicts, failure }) =>
   Effect.sync(() => {
     if (verdicts === null) {
       return {
         ...review,
+        status: review.status === "success" ? "completed_with_warnings" as const : review.status,
         warnings: [
           ...review.warnings,
           {
             file: "",
             type: "verifier_error",
-            message: "Finding verification produced no output; findings are unverified.",
+            message: `${SEAT.verify}: ${failure || "Finding verification produced no output"}; findings are unverified.`,
           },
         ],
       };
@@ -253,6 +259,19 @@ export const renderWalkthroughLayer = RenderWalkthrough.toLayer(
         story,
         files: changes.files,
         comments: review.comments,
+        outcome: {
+          status: review.status,
+          warnings: review.warnings,
+          files: changes.files.map((file) => {
+            const errors = review.warnings.filter((warning) => warning.file === file.path && warning.type === "subtask_error");
+            const reason = !file.reviewed ? file.excludeReason || "outside review scope"
+              : review.status === "skipped" ? "review skipped"
+              : errors.length > 0 ? errors.map((warning) => warning.message || "file review failed or incomplete").join("; ")
+              : review.status === "failed" ? "review failed"
+              : "";
+            return { path: file.path, status: reason ? "not_reviewed" as const : "reviewed" as const, reason };
+          }),
+        },
         repoDir: target.repoDir,
         mode: target.mode,
         ref: target.ref,
@@ -265,11 +284,11 @@ export const renderWalkthroughLayer = RenderWalkthrough.toLayer(
       const outPath = requested
         ? isAbsolute(requested) ? requested : resolve(target.repoDir, requested)
         : join(target.repoDir, ".smithers-review", "walkthrough.html");
-      mkdirSync(dirname(outPath), { recursive: true });
-      writeFileSync(outPath, html);
+      const artifactPath = writeWalkthroughArtifact(outPath, html);
       return {
         walkthrough: {
           path: outPath,
+          artifactPath,
           bytes: Buffer.byteLength(html),
           chapters: story.chapters.length,
           files: changes.files.length,

@@ -245,6 +245,8 @@ describe("the review flow", () => {
       expect(result.review.comments).toHaveLength(1);
       if (seat === "verify") {
         expect(result.review.warnings.some((warning) => warning.type === "verifier_error")).toBe(true);
+        expect(result.review.status).toBe("completed_with_warnings");
+        expect(result.review.warnings.find((warning) => warning.type === "verifier_error")?.message).toContain("timed out after 1 minute(s)");
       } else if (seat === "narrate") {
         expect(result.story.chapters.length).toBeGreaterThan(0);
         expect(result.story.headline).not.toBe("Two bindings");
@@ -287,6 +289,11 @@ describe("the review flow", () => {
       "src/file2.ts",
     ]);
     expect(result.review.warnings.some((warning) => warning.type === "subtask_error")).toBe(true);
+    const html = readFileSync(result.walkthrough.path, "utf8");
+    expect(html).toContain("Review incomplete or completed with warnings");
+    const fileArticle = (path: string) => html.split(`data-path="${path}">`)[1]!.split("</article>")[0]!;
+    expect(fileArticle("src/file0.ts")).toContain("not reviewed");
+    expect(fileArticle("src/file1.ts")).not.toContain("not reviewed");
   }, 120_000);
 
   test("verification runs on the findings and its verdicts reach the walkthrough", async () => {
@@ -315,6 +322,8 @@ describe("the review flow", () => {
 
     expect(result.review.comments).toHaveLength(1);
     expect(result.review.warnings.some((warning) => warning.type === "verifier_error")).toBe(true);
+    expect(result.review.status).toBe("completed_with_warnings");
+    expect(readFileSync(result.walkthrough.path, "utf8")).toContain("unverified");
   }, 120_000);
 
   test("the narrator's story reaches the rendered walkthrough", async () => {
