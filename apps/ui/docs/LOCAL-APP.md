@@ -497,7 +497,12 @@ Lane `sync` (ADR 0005) adds Linear and GitHub sync as actions:
   step reads the server error verbatim (`authorization expired · Open
   Linear again`), and the OAuth handoff rides the Bun server's
   `/api/linear-auth/*` receiver. The setup key, never a token, reaches the
-  renderer. On confirm the SAME card turns into the connected state:
+  renderer and stays in transient seam state shared by the user and agent
+  bindings. Cards, transition history, persistence, and error text exclude
+  the handle. Completion, failure, and expiry discard it; reloading requires
+  Open Linear again. Confirm requires a numeric integration id from the
+  create response or refreshed list; otherwise the setup card shows an error.
+  On confirm the SAME card turns into the connected state:
   `ENG · Engineering → org/repo`, the last-sync age, and Sync now /
   Activity / Disconnect (`/linear.sync`, `/linear.activity`,
   `/linear.disconnect`, the last confirming). The GitHub half renders the

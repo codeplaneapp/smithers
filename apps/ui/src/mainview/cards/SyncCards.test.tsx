@@ -84,7 +84,6 @@ const setupCard = (overrides: Partial<SetupPayload> = {}): Extract<Card, { kind:
       { id: "repository", label: "Repository", state: "pending", detail: "will/smithers" },
       { id: "confirm", label: "Confirm", state: "pending", detail: null }
     ],
-    setupKey: "sk-123",
     teams: [
       { id: "team-eng", name: "Engineering", key: "ENG" },
       { id: "team-design", name: "Design", key: "DES" }
@@ -193,7 +192,6 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
           { id: "repository", label: "Repository", state: "pending", detail: "will/smithers" },
           { id: "confirm", label: "Confirm", state: "pending", detail: null }
         ],
-        setupKey: undefined,
         teams: undefined
       })
     )
@@ -211,7 +209,6 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
           { id: "repository", label: "Repository", state: "pending", detail: "will/smithers" },
           { id: "confirm", label: "Confirm", state: "pending", detail: null }
         ],
-        setupKey: undefined,
         teams: undefined
       })
     )
@@ -236,7 +233,6 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
           { id: "repository", label: "Repository", state: "pending", detail: "will/smithers" },
           { id: "confirm", label: "Confirm", state: "pending", detail: null }
         ],
-        setupKey: undefined,
         teams: undefined
       })
     )
@@ -250,7 +246,7 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
     const { host } = renderSetup(
       setupCard({
         steps: [
-          { id: "authorize", label: "Authorize in your browser", state: "error", detail: null, error: "Reading /linear/setup/sk-123 failed (404)" },
+          { id: "authorize", label: "Authorize in your browser", state: "error", detail: null, error: "Reading /linear/setup failed (404)" },
           { id: "team", label: "Team", state: "pending", detail: null },
           { id: "repository", label: "Repository", state: "pending", detail: "will/smithers" },
           { id: "confirm", label: "Confirm", state: "pending", detail: null }
@@ -258,7 +254,7 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
       })
     )
 
-    expect(host.textContent).toContain("Reading /linear/setup/sk-123 failed (404)")
+    expect(host.textContent).toContain("Reading /linear/setup failed (404)")
   })
 
   test("the repository pick lists the loaded repositories", async () => {
@@ -280,7 +276,7 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
     expect(commands).toEqual([{ name: "linear.connect.repo", args: "will/smithers acme/flows" }])
   })
 
-  test("setup key and team picked renders the Connect act", () => {
+  test("authorized step and team picked render Connect without a setup handle", () => {
     const { host, commands } = renderSetup(setupCard({ teamId: "team-eng" }))
 
     click(host, "Connect")

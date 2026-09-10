@@ -141,7 +141,7 @@ const RepositoryPick = ({
 
 /** The Linear wizard and, on confirm, the connected state (the SAME card). */
 const LinearSetupBody = ({ card, onRunCommand }: { readonly card: ConnectorSetupCard } & SyncCardActions) => {
-  const { repo, steps, teams, teamId, setupKey, integration } = card.payload
+  const { repo, steps, teams, teamId, integration } = card.payload
   /*
    * Disconnect's card-level confirm (the workspace card's rule): the first
    * click arms a confirm row, the second sends the team key back as the
@@ -198,7 +198,7 @@ const LinearSetupBody = ({ card, onRunCommand }: { readonly card: ConnectorSetup
   const stepOf = (id: string) => steps.find((step) => step.id === id)
   const team = stepOf("team")
   const repository = stepOf("repository")
-  const confirmReady = setupKey !== undefined && teamId !== undefined
+  const confirmReady = stepOf("authorize")?.state === "done" && teamId !== undefined
   return (
     <div className="world-card-list">
       {steps.map((step) => (

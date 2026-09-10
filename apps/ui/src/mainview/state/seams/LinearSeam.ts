@@ -276,6 +276,31 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
   const timeoutMs = deps.timeoutMs ?? 5 * 60 * 1000
   const now = deps.now ?? (() => Date.now())
   const { url: cloud, get: getJson, send: sendJson } = createCloudClient(ctx)
+  /* Shared by actor bindings, never dispatched: the opening repo's card id
+     stays stable even when step 3 picks another repository. */
+  const setups = actorSharedState(ctx, "linear-setups", () => new Map<string, {
+    readonly key: string
+    timer?: ReturnType<typeof setTimeout>
+  }>())
+  const clearSetup = (id: string): void => {
+    const setup = setups.get(id)
+    if (setup?.timer !== undefined) clearTimeout(setup.timer)
+    setups.delete(id)
+  }
+  const rememberSetup = (id: string, key: string, expiresAt: number): void => {
+    clearSetup(id)
+    setups.set(id, { key })
+    const expire = (): void => {
+      const remaining = expiresAt - now()
+      if (remaining <= 0) { clearSetup(id); return }
+      const setup = setups.get(id)
+      // Long-lived test fixtures must not overflow the platform timer limit.
+      if (setup !== undefined) setup.timer = setTimeout(expire, Math.min(remaining, 2_147_483_647))
+    }
+    expire()
+  }
+  const redactSetupError = (message: string, key: string): string => key === "" ? message :
+    message.replaceAll(encodeURIComponent(key), "[redacted]").replaceAll(key, "[redacted]")
   /* One tracking loop per integration: a re-run supersedes the loop before it. */
   const epochs = actorSharedState(ctx, "linear-epochs", () => new Map<string, number>())
 
@@ -316,7 +341,6 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       repo,
       phase: patch.phase ?? prior?.phase ?? "setup",
       steps: (patch.steps ?? prior?.steps ?? freshSteps(repo)).map((step) => ({ ...step })),
-      ...(patch.setupKey !== undefined ? { setupKey: patch.setupKey } : prior?.setupKey !== undefined ? { setupKey: prior.setupKey } : {}),
       ...(patch.setupExpiresAt !== undefined ? { setupExpiresAt: patch.setupExpiresAt } : prior?.setupExpiresAt !== undefined ? { setupExpiresAt: prior.setupExpiresAt } : {}),
       ...(patch.actor !== undefined ? { actor: patch.actor } : prior?.actor !== undefined ? { actor: prior.actor } : {}),
       ...(patch.teams !== undefined ? { teams: patch.teams.map((team) => ({ ...team })) } : prior?.teams !== undefined ? { teams: prior.teams.map((team) => ({ ...team })) } : {}),
@@ -514,6 +538,7 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     if (refusal !== undefined) return refusal
     const target = resolveTargetRepo(ctx.store, repo)
     if ("error" in target) return target.error
+    clearSetup(cardIdOf(target.repo))
     upsertCard(cardIdOf(target.repo), target.repo, { phase: "setup", steps: freshSteps(target.repo) })
     return { value: `Connect Linear on ${target.repo} — the card walks the handoff.` }
   }
@@ -527,6 +552,7 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     const found = findCard(repoId)
     if (found === undefined) return `No Linear connect card for ${repoId} — /linear.connect opens it.`
     const { id } = found
+    clearSetup(id)
     const prior = found.payload
     const readCard = (): SetupPayload | undefined => {
       const current = ctx.store.collections.cards.get(id)
@@ -583,14 +609,13 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       return HANDOFF_TIMEOUT_NOTE
     }
     /* The setup lookup: the teams the key can see. */
-    const answer = await getJson(`/linear/setup/${encodeURIComponent(setupKey)}`)
+    const answer = await getJson(`/linear/setup/${encodeURIComponent(setupKey)}`, "/linear/setup")
     if ("error" in answer) {
       const current = readCard() ?? prior
       /* plue's own words for a spent or aged-out key: "linear oauth setup not found or expired". */
       const expired = /setup/i.test(answer.error) && /(expired|not found)/i.test(answer.error)
-      const message = expired ? SETUP_EXPIRED_NOTE : answer.error
+      const message = expired ? SETUP_EXPIRED_NOTE : redactSetupError(answer.error, setupKey)
       upsertCard(id, repoId, {
-        setupKey,
         steps: patchStep(current.steps, "authorize", { state: "error", error: message })
       })
       return message
@@ -602,19 +627,21 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       upsertCard(id, repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: message }) })
       return message
     }
-    if (setup.expiresAt !== null && Date.parse(setup.expiresAt) <= Date.now()) {
+    const parsedExpiry = setup.expiresAt === null ? NaN : Date.parse(setup.expiresAt)
+    const expiresAt = Number.isFinite(parsedExpiry) ? parsedExpiry : now() + timeoutMs
+    if (expiresAt <= now()) {
       const current = readCard() ?? prior
       upsertCard(id, repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: SETUP_EXPIRED_NOTE }) })
       return SETUP_EXPIRED_NOTE
     }
     const current = readCard() ?? prior
+    rememberSetup(id, setupKey, expiresAt)
     upsertCard(id, repoId, {
-      setupKey,
-      ...(setup.expiresAt !== null ? { setupExpiresAt: setup.expiresAt } : {}),
+      setupExpiresAt: new Date(expiresAt).toISOString(),
       actor: setup.actor,
       teams: [...setup.teams],
       steps: patchStep(
-        patchStep(current.steps, "authorize", { state: "done", detail: setup.actor === null ? "authorized" : `authorized as ${setup.actor}` }),
+        patchStep(current.steps, "authorize", { state: "done", error: undefined, detail: setup.actor === null ? "authorized" : `authorized as ${setup.actor}` }),
         "team",
         { state: "active" }
       )
@@ -662,16 +689,35 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     const found = findCard(target.repo)
     if (found === undefined) return `No Linear connect card for ${target.repo} — /linear.connect opens it.`
     const prior = found.payload
-    if (prior.setupKey === undefined) return "Step 1 first: Open Linear and authorize."
+    if (prior.phase === "setup" && prior.setupExpiresAt !== undefined && Date.parse(prior.setupExpiresAt) <= now()) {
+      clearSetup(found.id)
+      upsertCard(found.id, prior.repo, {
+        steps: patchStep(prior.steps, "authorize", { state: "error", detail: null, error: SETUP_EXPIRED_NOTE })
+      })
+      return SETUP_EXPIRED_NOTE
+    }
+    const setup = setups.get(found.id)
+    if (setup === undefined) {
+      if (prior.phase === "setup") upsertCard(found.id, prior.repo, {
+        steps: patchStep(prior.steps, "authorize", { state: "active", detail: null, error: undefined })
+      })
+      return "Step 1 first: Open Linear and authorize."
+    }
     if (prior.teamId === undefined) return "Step 2 first: pick the Linear team."
+    // A create consumes this attempt, even if its response is refused or malformed.
+    clearSetup(found.id)
     const created = await sendJson("POST", "/linear", {
-      setup_key: prior.setupKey,
+      setup_key: setup.key,
       linear_team_id: prior.teamId,
       repo: prior.repo
     })
     if ("error" in created) {
-      upsertCard(found.id, prior.repo, { error: created.error })
-      return created.error
+      const message = redactSetupError(created.error, setup.key)
+      upsertCard(found.id, prior.repo, {
+        error: message,
+        steps: patchStep(prior.steps, "authorize", { state: "active", detail: null, error: undefined })
+      })
+      return message
     }
     await refreshIntegrations()
     const row = [...ctx.store.collections.linearIntegrations.values()].find(
@@ -680,13 +726,22 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     /* The create's echo names no team KEY (plue answers id/name/repo/active
        only), so the key comes off the refreshed row, else the picked team. */
     const wire = isRecord(created.body) ? created.body : {}
+    const integrationId = intOrNull(wire.id) ?? (row === undefined ? null : intOrNull(Number(row.id)))
+    if (integrationId === null) {
+      const message = "Smithers Cloud created the Linear integration without naming an integration id."
+      upsertCard(found.id, prior.repo, {
+        error: message,
+        steps: patchStep(prior.steps, "authorize", { state: "active", detail: null, error: undefined })
+      })
+      return message
+    }
     upsertCard(found.id, prior.repo, {
       phase: "connected",
       error: undefined,
       /* plue#491: the 201 echoes `linear_actor`, so a card that skipped the wizard's step 1 still names the account. */
       ...(linearActorName(wire.linear_actor) === null ? {} : { actor: linearActorName(wire.linear_actor) }),
       integration: {
-        id: intOrNull(wire.id) ?? (row !== undefined ? Number(row.id) : 0),
+        id: integrationId,
         teamKey: str(wire.linear_team_key) ?? row?.teamKey ?? prior.teams?.find((team) => team.id === prior.teamId)?.key ?? "",
         teamName: str(wire.linear_team_name) ?? row?.teamName ?? "",
         active: wire.is_active !== false,

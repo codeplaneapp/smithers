@@ -1,7 +1,7 @@
-import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
+import { createActorBindings } from "../ActorBindings"
 import type { AppStore } from "../AppStore"
 import {
   createLinearSeam,
@@ -29,12 +29,13 @@ import type { SeamContext } from "./SeamContext"
  * skipped`, and the run's counts are PER ENTITY. Every route is a double.
  */
 
-const memoryStorage = (): StorageApi => {
+const memoryStorage = () => {
   const data = new Map<string, string>()
   return {
-    getItem: (key) => data.get(key) ?? null,
-    setItem: (key, value) => void data.set(key, value),
-    removeItem: (key) => void data.delete(key)
+    data,
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => void data.set(key, value),
+    removeItem: (key: string) => void data.delete(key)
   }
 }
 
@@ -123,7 +124,8 @@ const harness = async (
   routes: Record<string, Route>,
   options: { readonly signedIn?: boolean } & LinearSeamDeps = {}
 ) => {
-  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const storage = memoryStorage()
+  const store = await createAppStore({ kind: "localStorage", storage })
   const requests: Array<string> = []
   const ctx: SeamContext = {
     http: async (input, init) => {
@@ -165,7 +167,9 @@ const harness = async (
     ]
   })
   const { signedIn: _signedIn, ...deps } = options
-  return { store, seam: createLinearSeam(ctx, deps), requests }
+  const bindings = createActorBindings(() => {})
+  const seam = bindings.pair(ctx, (context) => createLinearSeam(context, deps))
+  return { store, storage, seam, requests, confirmAsAgent: () => bindings.select(seam.confirmConnect)() }
 }
 
 const textOf = (result: unknown): string | undefined =>
@@ -250,7 +254,7 @@ describe("createLinearSeam", () => {
     expect(requests).toContain("POST /api/linear-auth/start")
     expect(requests).toContain("GET api/linear/setup/sk-123")
     const payload = payloadOf(store)
-    expect(payload?.setupKey).toBe("sk-123")
+    expect(payload).not.toHaveProperty("setupKey")
     expect(payload?.actor).toBe("Will")
     expect(payload?.teams).toEqual(SETUP.teams)
     expect(payload?.steps.find((step) => step.id === "authorize")).toEqual({
@@ -300,10 +304,10 @@ describe("createLinearSeam", () => {
 
     const result = await seam.openLinear()
 
-    expect(result).toBe("Reading /linear/setup/sk-123 failed (404)")
+    expect(result).toBe("Reading /linear/setup failed (404)")
     const authorize = payloadOf(store)?.steps.find((step) => step.id === "authorize")
     expect(authorize?.state).toBe("error")
-    expect(authorize?.error).toBe("Reading /linear/setup/sk-123 failed (404)")
+    expect(authorize?.error).toBe("Reading /linear/setup failed (404)")
   })
 
   test("openLinear with an expired setup key reads authorization expired", async () => {
@@ -387,6 +391,122 @@ describe("createLinearSeam", () => {
     const row = store.collections.linearIntegrations.get("7")
     expect(row?.teamKey).toBe("ENG")
     expect(row?.lastSyncAt).toBe("2026-09-02T09:00:00Z")
+  })
+
+  test("setup handles never enter cards, transitions, or localStorage, including after completion", async () => {
+    const { store, storage, seam } = await harness({
+      "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
+      "GET /api/linear-auth/session": authorizedSession(),
+      "api/linear/setup/sk-123": json(200, SETUP),
+      "POST api/linear": json(201, INTEGRATION),
+      "api/integrations/linear": json(200, [INTEGRATION])
+    }, { pollMs: 1, timeoutMs: 5000, openExternal: async () => true })
+    const assertPrivate = async () => {
+      await store.dispatch({ type: "linear.integrations.loaded", actor: "system", integrations: [] }).isPersisted.promise
+      expect(JSON.stringify([...store.collections.cards.values()])).not.toContain("sk-123")
+      expect(JSON.stringify([...store.collections.transitions.values()])).not.toContain("sk-123")
+      expect(storage.data.size).toBeGreaterThan(0)
+      expect(JSON.stringify([...storage.data])).not.toContain("sk-123")
+    }
+    await seam.connect()
+    await seam.openLinear()
+    await assertPrivate()
+    await seam.pickTeam("team-eng")
+    await seam.confirmConnect()
+    expect(payloadOf(store)?.phase).toBe("connected")
+    await assertPrivate()
+    expect(await seam.confirmConnect()).toBe("Step 1 first: Open Linear and authorize.")
+  })
+
+  for (const failure of ["fallback", "server", "transport"] as const) {
+    test(`setup ${failure} failures redact the handle from error text and storage`, async () => {
+      const { store, storage, seam } = await harness({
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
+        "GET /api/linear-auth/session": authorizedSession(),
+        "api/linear/setup/sk-123": () => {
+          if (failure === "transport") throw new Error("request /linear/setup/sk-123 failed")
+          return failure === "server" ? json(503, { message: "setup sk-123 unavailable" })() : new Response(null, { status: 503 })
+        }
+      }, { pollMs: 1, timeoutMs: 5000, openExternal: async () => true })
+      await seam.connect()
+      const result = await seam.openLinear()
+      expect(typeof result).toBe("string")
+      expect(result).not.toContain("sk-123")
+      if (failure === "fallback") expect(result).toBe("Reading /linear/setup failed (503)")
+      await store.dispatch({ type: "linear.integrations.loaded", actor: "system", integrations: [] }).isPersisted.promise
+      expect(JSON.stringify([...store.collections.cards.values()])).not.toContain("sk-123")
+      expect(JSON.stringify([...store.collections.transitions.values()])).not.toContain("sk-123")
+      expect(JSON.stringify([...storage.data])).not.toContain("sk-123")
+      expect(await seam.confirmConnect()).toBe("Step 1 first: Open Linear and authorize.")
+    })
+  }
+
+  test("a create echo and refreshed list without an id cannot invent a connected integration", async () => {
+    const { id: _id, ...unnamed } = INTEGRATION
+    const { store, seam } = await harness({
+      "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
+      "GET /api/linear-auth/session": authorizedSession(),
+      "api/linear/setup/sk-123": json(200, SETUP),
+      "POST api/linear": json(201, unnamed),
+      "api/integrations/linear": json(200, [])
+    }, { pollMs: 1, timeoutMs: 5000, openExternal: async () => true })
+    await seam.connect()
+    await seam.openLinear()
+    await seam.pickTeam("team-eng")
+    expect(await seam.confirmConnect()).toBe("Smithers Cloud created the Linear integration without naming an integration id.")
+    expect(payloadOf(store)?.phase).toBe("setup")
+    expect(payloadOf(store)?.integration).toBeUndefined()
+    expect(cardOf(store)?.status).toBe("error")
+    expect(payloadOf(store)?.error).toBe("Smithers Cloud created the Linear integration without naming an integration id.")
+  })
+
+  test("the agent binding can confirm the user's transient setup using the refreshed id", async () => {
+    const { store, seam, confirmAsAgent } = await harness({
+      "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
+      "GET /api/linear-auth/session": authorizedSession(),
+      "api/linear/setup/sk-123": json(200, SETUP),
+      "POST api/linear": json(201, {}),
+      "api/integrations/linear": json(200, [INTEGRATION])
+    }, { pollMs: 1, timeoutMs: 5000, openExternal: async () => true })
+    await seam.connect()
+    await seam.openLinear()
+    await seam.pickTeam("team-eng")
+    expect(textOf(await confirmAsAgent())).toBe("Linear ENG connected to will/smithers — the card tracks it.")
+    expect(payloadOf(store)?.integration?.id).toBe(7)
+  })
+
+  test("an expired setup cannot be posted and is discarded", async () => {
+    let clock = Date.now()
+    const { store, seam, requests } = await harness({
+      "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
+      "GET /api/linear-auth/session": authorizedSession(),
+      "api/linear/setup/sk-123": json(200, { ...SETUP, expires_at: new Date(clock + 60_000).toISOString() })
+    }, { pollMs: 1, timeoutMs: 5000, openExternal: async () => true, now: () => clock })
+    await seam.connect()
+    await seam.openLinear()
+    await seam.pickTeam("team-eng")
+    clock += 60_001
+    expect(await seam.confirmConnect()).toBe(SETUP_EXPIRED_NOTE)
+    expect(requests).not.toContain("POST api/linear")
+    expect(payloadOf(store)?.steps.find((step) => step.id === "authorize")?.state).toBe("error")
+    clock -= 60_001
+    expect(await seam.confirmConnect()).toBe("Step 1 first: Open Linear and authorize.")
+  })
+
+  test("a failed create redacts and discards its setup handle", async () => {
+    const { store, seam, requests } = await harness({
+      "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
+      "GET /api/linear-auth/session": authorizedSession(),
+      "api/linear/setup/sk-123": json(200, SETUP),
+      "POST api/linear": json(503, { message: "create for sk-123 unavailable" })
+    }, { pollMs: 1, timeoutMs: 5000, openExternal: async () => true })
+    await seam.connect()
+    await seam.openLinear()
+    await seam.pickTeam("team-eng")
+    expect(await seam.confirmConnect()).toBe("create for [redacted] unavailable")
+    expect(JSON.stringify([...store.collections.transitions.values()])).not.toContain("sk-123")
+    expect(await seam.confirmConnect()).toBe("Step 1 first: Open Linear and authorize.")
+    expect(requests.filter((line) => line === "POST api/linear")).toHaveLength(1)
   })
 
   test("picking another repository at step 3 keeps the card, and Connect posts the picked repository", async () => {
