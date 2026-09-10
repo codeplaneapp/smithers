@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- Nested explicit `Node.andThen` continuations now carry only their nearest
+  success barrier, preserving transitive ordering while making continuation
+  edges and `Pending` inputs linear for right-nested chains. This is a
+  pre-freeze key-affecting change: affected compiled keys/digests change and
+  require a newly approved plan; existing executions are not rewritten.
+  Structural `.andThen`/`.then` node IDs retain their spelling and durable
+  dispatch identity. Their depth growth and quadratic total ID bytes are now
+  documented, with bounded trampoline rounds or `.child()` boundaries for long
+  chains. (`flows-flow/performance/1`, `flows-flow/performance/5`)
+
 - Explicit `Node.andThen` now gates its entire next subtree on upstream
   success. Nested combinations, maps, inline flows, branches, catches and
   sequences no longer start actions before the first node finishes or after

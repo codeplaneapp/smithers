@@ -6,6 +6,7 @@ import { withCrypto } from "./Crypto.ts"
 import { layerMemory, makeInstance } from "./MemoryFlowRuntime.ts"
 
 const First = Action.make("sequence-boundary/First", { payload: {}, success: Schema.Number, error: Schema.String })
+const Middle = Action.make("sequence-boundary/Middle", { payload: {}, success: Schema.Number, error: Schema.String })
 const Later = Action.make("sequence-boundary/Later", { payload: {}, success: Schema.String })
 const Inline = Flow.make("sequence-boundary/Inline", {
   payload: {},
@@ -117,7 +118,50 @@ describe("explicit andThen subtree boundaries", () => {
         })))
     }
 
-    it.effect(`the compiled ${name} subtree retains the explicit prerequisite on every descendant`, () =>
+    for (const fail of [false, true]) {
+      it.effect(`nested ${name} waits for the nearest prerequisite (${fail ? "failure" : "success"})`, () =>
+        withCrypto(Effect.gen(function*() {
+          const events: Array<string> = []
+          const implementation = Layer.mergeAll(
+            First.toLayer(() =>
+              Effect.sync(() => {
+                events.push("first")
+                return 1
+              })
+            ),
+            Middle.toLayer(() =>
+              Effect.gen(function*() {
+                events.push("middle:start")
+                for (let turn = 0; turn < 8; turn++) yield* Effect.yieldNow
+                events.push(fail ? "middle:failed" : "middle:done")
+                if (fail) return yield* Effect.fail("middle failed")
+                return 2
+              })
+            ),
+            Later.toLayer(() =>
+              Effect.sync(() => {
+                events.push("later")
+                return "later"
+              })
+            )
+          ).pipe(Layer.provideMerge(Action.layerImplementations), Layer.provideMerge(layerMemory))
+          const result = yield* Interpreter.interpret(
+            Node.andThen(First.call({}), Node.andThen(Middle.call({}), next()))
+          ).pipe(
+            Effect.provideService(FlowRuntime.FlowInstance, makeInstance(Inline, "nested-sequence-boundary")),
+            Effect.provide(implementation),
+            Effect.exit
+          )
+          expect(events).toEqual(
+            fail
+              ? ["first", "middle:start", "middle:failed"]
+              : ["first", "middle:start", "middle:done", "later"]
+          )
+          expect(Exit.isFailure(result)).toBe(fail)
+        })))
+    }
+
+    it.effect(`the compiled ${name} subtree retains a dependency path to the explicit prerequisite on every descendant`, () =>
       withCrypto(Effect.gen(function*() {
         const graph = Graph.build(First.call({}).pipe(Node.andThen(next())))
         const plan = yield* Plan.compile({
@@ -125,8 +169,19 @@ describe("explicit andThen subtree boundaries", () => {
           flow: "test/Sequence",
           nodes: Graph.drafts(graph)
         })
+        const byId = new Map(plan.nodes.map((node) => [node.id, node]))
         for (const node of plan.nodes.filter((node) => node.id.startsWith("root.then"))) {
-          expect(node.dependsOn, node.id).toContain("root.andThen")
+          // A nested sequence may reach the outer barrier through its nearest
+          // prerequisite. Every descendant must still wait for outer success.
+          const dependencies = new Set<string>()
+          const pending = [...node.dependsOn]
+          while (pending.length > 0) {
+            const dependency = pending.pop()!
+            if (dependencies.has(dependency)) continue
+            dependencies.add(dependency)
+            pending.push(...byId.get(dependency)!.dependsOn)
+          }
+          expect(dependencies, node.id).toContain("root.andThen")
         }
       })))
   }

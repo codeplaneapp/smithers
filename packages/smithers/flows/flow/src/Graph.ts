@@ -1328,7 +1328,9 @@ export const build = (
                   // Explicit andThen sequences every descendant, not only the
                   // result/join node. bindPlanned remains a dependency builder:
                   // independent members can run while a referenced producer runs.
-                  barriers: ast.next === undefined ? request.barriers : [...request.barriers, first]
+                  // The first subtree already carries the outer barriers, so
+                  // its success transitively gates every nested descendant.
+                  barriers: ast.next === undefined ? request.barriers : [first]
                 })),
               () => depend(thenId, "value")
             ])

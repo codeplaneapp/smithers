@@ -134,6 +134,24 @@ describe("Graph.build topology", () => {
     expect(Graph.nodes(stat).map((observed) => observed.id)).toEqual(["root.andThen", "root.then", "root"])
   })
 
+  it("keeps right-nested sequence Pending inputs and continuation edges linear", () => {
+    for (const depth of [1, 10, 100, 300]) {
+      let next: Node.Node<number> = Node.succeed(depth)
+      for (let index = depth - 1; index >= 0; index--) next = Node.andThen(Node.succeed(index), next)
+      const graph = Graph.build(next)
+      const pending = Graph.drafts(graph).flatMap((draft) =>
+        draft.material.inputs.filter((input) => input._tag === "Pending")
+      )
+
+      expect(Graph.nodes(graph)).toHaveLength(2 * depth + 1)
+      expect(pending).toHaveLength(2 * depth - 1)
+      expect(Graph.edges(graph).filter((edge) => edge.reason === "continuation")).toHaveLength(2 * depth - 1)
+      for (const observed of Graph.nodes(graph)) {
+        expect(observed.draft.material.inputs.filter((input) => input._tag === "Pending").length).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
   it("keeps a real payload intact for the body, values that are not plain data included", () => {
     const when = new Date(0)
     const seen: Array<unknown> = []
