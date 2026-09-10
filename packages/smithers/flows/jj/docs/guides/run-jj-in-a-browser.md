@@ -182,6 +182,12 @@ any wasm module: `make` returns plain functions over memory, a filesystem, and
 a file-descriptor table, so a test constructs a `WebAssembly.Memory`, calls the
 syscalls directly, and asserts errno values.
 
+`path_open` applies `O_TRUNC` even with `APPEND`, then appends subsequent
+writes to the current end of file. It validates the four-byte result region
+before allocating a descriptor. If post-open truncation fails, it attempts to
+close the host descriptor and returns the original truncation error, even if
+closing also fails.
+
 ### Namespace ownership is required
 
 `root` is not a security sandbox for `node:fs` under concurrent mutation.

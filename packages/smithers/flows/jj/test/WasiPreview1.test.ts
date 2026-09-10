@@ -681,6 +681,123 @@ describe("WasiPreview1 path_open", () => {
     expect(fsModule.readFileSync(join(root, "trunc.txt"), "utf8")).toBe("refilled")
   })
 
+  it.each([
+    { creat: false, rights: W },
+    { creat: false, rights: RW },
+    { creat: true, rights: W },
+    { creat: true, rights: RW }
+  ])("truncates before appending with creat=$creat and rights=$rights", ({ creat, rights }) => {
+    const root = freshDir()
+    const path = join(root, "append-trunc.txt")
+    fsModule.writeFileSync(path, "OLD")
+    let opened = 0
+    let closed = 0
+    const h = host({
+      root,
+      fs: {
+        ...nodeFs,
+        openSync: (path, flags) => {
+          const fd = nodeFs.openSync(path, flags)
+          opened++
+          return fd
+        },
+        closeSync: (fd) => {
+          nodeFs.closeSync(fd)
+          closed++
+        }
+      }
+    })
+    const fd = open(h, "/append-trunc.txt", {
+      oflags: OFLAG.trunc | (creat ? OFLAG.creat : 0),
+      rights,
+      fdflags: 1
+    })
+    try {
+      expect(fsModule.statSync(path).size).toBe(0)
+      expect(writeAll(h, fd, "NEW")).toBe(E.success)
+      expect(h.sys.fd_seek!(fd, 0n, 0, RET)).toBe(E.success)
+      expect(writeAll(h, fd, "!")).toBe(E.success)
+      expect(fsModule.readFileSync(path, "utf8")).toBe("NEW!")
+    } finally {
+      expect(h.sys.fd_close!(fd)).toBe(E.success)
+    }
+    expect({ opened, closed }).toEqual({ opened: 1, closed: 1 })
+  })
+
+  it.each([
+    { append: false, creat: false, closeThrows: false },
+    { append: false, creat: false, closeThrows: true },
+    { append: true, creat: false, closeThrows: false },
+    { append: true, creat: false, closeThrows: true },
+    { append: true, creat: true, closeThrows: false },
+    { append: true, creat: true, closeThrows: true }
+  ])("closes failed truncating opens with $append/$creat/$closeThrows", ({ append, creat, closeThrows }) => {
+    const root = freshDir()
+    fsModule.writeFileSync(join(root, "trunc-error.txt"), "OLD")
+    const opened: Array<number> = []
+    const closed: Array<number> = []
+    const truncated: Array<number> = []
+    const h = host({
+      root,
+      fs: {
+        ...nodeFs,
+        openSync: () => {
+          const fd = 100 + opened.length
+          opened.push(fd)
+          return fd
+        },
+        ftruncateSync: (fd, size) => {
+          expect(size).toBe(0)
+          truncated.push(fd)
+          throw codeError("EIO")
+        },
+        closeSync: (fd) => {
+          closed.push(fd)
+          if (closeThrows) throw codeError("EBADF")
+        }
+      }
+    })
+    const errnos = Array.from({ length: 3 }, () =>
+      openErrno(h, "/trunc-error.txt", {
+        oflags: OFLAG.trunc | (creat ? OFLAG.creat : 0),
+        rights: RW,
+        fdflags: append ? 1 : 0
+      }))
+    expect(errnos).toEqual([E.io, E.io, E.io])
+    expect(opened).toEqual([100, 101, 102])
+    expect(truncated).toEqual(opened)
+    expect(closed).toEqual(opened)
+    expect(h.sys.fd_close!(4)).toBe(E.badf)
+  })
+
+  it.each([false, true])("rejects invalid open result pointers before allocating (directory=%s)", (directory) => {
+    const root = freshDir()
+    const path = join(root, "target")
+    if (directory) fsModule.mkdirSync(path)
+    else fsModule.writeFileSync(path, "OLD")
+    let opened = 0
+    let closed = 0
+    const h = host({
+      root,
+      fs: {
+        ...nodeFs,
+        openSync: () => ++opened + 100,
+        closeSync: () => {
+          closed++
+        }
+      }
+    })
+    const p = h.str(PATH_A, "/target")
+    for (const retPtr of [h.memory.buffer.byteLength - 3, h.memory.buffer.byteLength, -1]) {
+      expect(h.sys.path_open!(3, 1, p.ptr, p.len, 0, R, 0n, 0, retPtr)).toBe(E.fault)
+    }
+    expect({ opened, closed }).toEqual({ opened: 0, closed: 0 })
+    const fd = open(h, "/target")
+    expect(fd).toBe(4)
+    expect(h.sys.fd_close!(fd)).toBe(E.success)
+    expect({ opened, closed }).toEqual(directory ? { opened: 0, closed: 0 } : { opened: 1, closed: 1 })
+  })
+
   it("opens plain write fds against existing files without truncating", () => {
     const root = freshDir()
     fsModule.writeFileSync(join(root, "patch.txt"), "abcdef")

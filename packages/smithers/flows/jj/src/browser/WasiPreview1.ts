@@ -918,26 +918,39 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
       if (o.creat && !o.existing) fs.closeSync(fs.openSync(path, "wx"))
       return fs.openSync(path, "r")
     }
+    let flags: string
     if (o.append) {
       // The earlier existence probe cannot make O_EXCL atomic. Keeping the
       // exclusive append flag here makes the backend reject a file created in
       // that gap instead of opening the concurrent writer's file.
-      return fs.openSync(path, o.creat && o.excl ? (o.read ? "ax+" : "ax") : o.read ? "a+" : "a")
-    }
-    if (o.creat) {
+      flags = o.creat && o.excl ? (o.read ? "ax+" : "ax") : o.read ? "a+" : "a"
+    } else if (o.creat) {
       // `O_CREAT|O_EXCL` keeps an exclusive flag even with `O_TRUNC`. The
       // caller's existence check happened one syscall ago, and O_EXCL exists
       // precisely so that gap cannot be used: without `wx` a file created in
       // between is TRUNCATED instead of answering EEXIST.
       if (o.trunc) {
-        return fs.openSync(path, o.excl ? (o.read ? "wx+" : "wx") : o.read ? "w+" : "w")
+        flags = o.excl ? (o.read ? "wx+" : "wx") : o.read ? "w+" : "w"
+      } else {
+        flags = o.existing ? "r+" : o.read ? "wx+" : "wx"
       }
-      if (!o.existing) return fs.openSync(path, o.read ? "wx+" : "wx")
-      return fs.openSync(path, "r+")
+    } else {
+      flags = "r+"
     }
-    const osFd = fs.openSync(path, "r+")
-    if (o.trunc) fs.ftruncateSync(osFd, 0)
-    return osFd
+    const osFd = fs.openSync(path, flags)
+    try {
+      // Append flags preserve existing bytes; only the non-append create
+      // flags already perform truncation as part of openSync.
+      if (o.trunc && (o.append || !o.creat)) fs.ftruncateSync(osFd, 0)
+      return osFd
+    } catch (cause) {
+      try {
+        fs.closeSync(osFd)
+      } catch {
+        // Preserve the initialization error even when cleanup fails.
+      }
+      throw cause
+    }
   }
 
   const pathOpen = (
@@ -951,6 +964,9 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     fdflags: number,
     retPtr: number
   ): number => {
+    // Validate the entire result before opening a host fd or allocating a
+    // guest fd (including directories), so EFAULT cannot strand either one.
+    bytes(retPtr, 4)
     // These checks are not atomic with openFile. In particular, no-follow
     // rejects a stable final link; it cannot stop an external writer replacing
     // that file or any ancestor before the backend's string-path open.
