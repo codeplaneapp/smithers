@@ -1,8 +1,9 @@
 import { Action } from "@smthrs/flow"
-import { Effect, Exit, Layer } from "effect"
+import { Effect, Exit, Layer, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import * as Hooks from "../src/Hooks.ts"
 import type { FlowsPlugin } from "../src/index.ts"
+import { PluginError } from "../src/PluginError.ts"
 import * as Plugins from "../src/Plugins.ts"
 import * as Resolve from "../src/Resolve.ts"
 
@@ -43,6 +44,61 @@ describe("bounded plugin admission", () => {
     for (const name of ["", "\ud800", "line\nbreak", "x".repeat(Resolve.maximumPluginNameLength + 1)]) {
       expect(await refusal({ name })).toMatchObject({ code: "invalid_plugin", path: "$.name" })
     }
+  })
+
+  it("keeps canonically distinct plugin hook names distinct", async () => {
+    const names = ["é", "e\u0301", "x".repeat(Resolve.maximumPluginNameLength)]
+    const resolved = await run(Resolve.resolve({
+      name: "p",
+      hooks: Object.fromEntries(names.map((name) => [name, () => Effect.void]))
+    } as never, { hooks: Object.fromEntries(names.map((name) => [name, "sequential" as const])) }))
+    expect([...resolved.handlers.keys()]).toEqual(names)
+  })
+
+  it.each(["", " \u00a0", "\ud800", "line\nbreak\u001b[31m", "x".repeat(257), "x".repeat(5_000_000)])(
+    "refuses malformed plugin hook names with a bounded diagnostic (%#)",
+    async (hook) => {
+      for (const apply of ["engine", "harness"]) {
+        const error = await refusal({ name: "p", apply, hooks: { [hook]: () => Effect.void } })
+        expect(error.code).toBe("invalid_plugin")
+        expect(error.path).toBe("$.hooks[0]")
+        expect(error.hook).toBeUndefined()
+        expect(new TextEncoder().encode(JSON.stringify(Schema.encodeSync(PluginError)(error))).byteLength)
+          .toBeLessThan(512)
+      }
+    }
+  )
+
+  it("bounds and quotes unknown property and descriptor diagnostics", async () => {
+    for (const key of ["x".repeat(5_000_000), "line\nbreak\u001b[31m", "quote\"\\key"]) {
+      const inputs = [
+        { name: "p", [key]: true },
+        { name: "p", hooks: { config: { handler: () => Effect.void, [key]: true } } },
+        { name: "p", hooks: Object.defineProperty({}, key, { get: () => Effect.void, enumerable: true }) }
+      ]
+      for (const input of inputs) {
+        const error = await refusal(input)
+        expect(error.code).toBe("invalid_plugin")
+        expect(error.path).not.toMatch(/[\n\u001b]/u)
+        expect(new TextEncoder().encode(JSON.stringify(Schema.encodeSync(PluginError)(error))).byteLength)
+          .toBeLessThan(512)
+      }
+      const optionError = await refusal([], { [key]: true } as Resolve.Options)
+      expect(optionError.path).not.toMatch(/[\n\u001b]/u)
+      expect(new TextEncoder().encode(JSON.stringify(Schema.encodeSync(PluginError)(optionError))).byteLength)
+        .toBeLessThan(512)
+    }
+    expect(await refusal({ name: "p", ["quote\"\\key"]: true })).toMatchObject({
+      path: "$[\"quote\\\"\\\\key\"]"
+    })
+  })
+
+  it("quotes and caps unknown hook diagnostics while retaining the admitted hook identity", async () => {
+    const hook = "quote\"\\" + "x".repeat(249)
+    const error = await refusal({ name: "p", hooks: { [hook]: () => Effect.void } })
+    expect(error).toMatchObject({ code: "unknown_hook", hook })
+    expect(error.message).toContain(JSON.stringify(hook.slice(0, 64) + "..."))
+    expect(error.path).toBe(`$.hooks[${JSON.stringify(hook.slice(0, 64) + "...")}]`)
   })
 
   it("rejects whitespace-only names and versions at their declared paths", async () => {
@@ -254,6 +310,46 @@ describe("bounded plugin admission", () => {
     let nested: unknown = { name: "deep" }
     for (let index = 0; index <= Resolve.maximumPluginDepth; index++) nested = [nested]
     expect(await refusal(nested)).toMatchObject({ code: "resource_limit" })
+  })
+
+  it("bounds preset descriptor work before enumerating an oversized array", async () => {
+    let descriptorReads = 0
+    let enumerations = 0
+    const input = new Proxy(Array(100_000).fill(false), {
+      ownKeys: (target) => {
+        enumerations += 1
+        return Reflect.ownKeys(target)
+      },
+      getOwnPropertyDescriptor: (target, key) => {
+        descriptorReads += 1
+        return Reflect.getOwnPropertyDescriptor(target, key)
+      }
+    })
+    const error = await refusal(input)
+    expect(error.code).toBe("resource_limit")
+    expect(descriptorReads).toBeLessThanOrEqual(Resolve.maximumPluginInputNodes)
+    expect(error.path).toBe("$")
+    expect(enumerations).toBe(0)
+  })
+
+  it("reserves node capacity for pending preset frames", async () => {
+    let descriptorReads = 0
+    const tracked = (values: Array<unknown>) =>
+      new Proxy(values, {
+        getOwnPropertyDescriptor: (target, key) => {
+          descriptorReads += 1
+          return Reflect.getOwnPropertyDescriptor(target, key)
+        }
+      })
+    const children = tracked(Array(Resolve.maximumPluginInputNodes - 3).fill(false))
+    const input = tracked([children, false, false])
+    const error = await refusal(input)
+    expect(error.code).toBe("resource_limit")
+    expect(descriptorReads).toBe(3)
+    expect(error.path).toBe("$[0]")
+
+    const atLimit = [Array(Resolve.maximumPluginInputNodes - 4).fill(false), false, false]
+    expect((await run(Resolve.resolve(atLimit as never))).plugins).toEqual([])
   })
 
   it("enforces plugin, input-node, and handler ceilings", async () => {

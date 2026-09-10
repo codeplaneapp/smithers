@@ -141,6 +141,15 @@ const invalidPlugin = (
   fields: { readonly plugin?: string; readonly hook?: string } = {}
 ): PluginError => failure("invalid_plugin", `plugin input ${complaint}`, path, fields)
 
+// Bound before quoting or scanning caller-controlled keys. Keep Boundary's
+// identifier/dot and JSON-quoted/bracket path convention.
+const diagnosticKey = (key: string): string => key.length > 64 ? `${key.slice(0, 64)}...` : key
+
+const childPath = (path: string, key: string): string => {
+  const bounded = diagnosticKey(key)
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(bounded) ? `${path}.${bounded}` : `${path}[${JSON.stringify(bounded)}]`
+}
+
 const ownData = (
   input: unknown,
   path: string,
@@ -155,11 +164,11 @@ const ownData = (
   for (const key of Reflect.ownKeys(input)) {
     if (typeof key !== "string") throw invalidPlugin(path, "must not contain symbol keys")
     if (allowed !== undefined && !allowed.has(key)) {
-      throw invalidPlugin(`${path}.${key}`, "contains an unknown property")
+      throw invalidPlugin(childPath(path, key), "contains an unknown property")
     }
     const descriptor = Object.getOwnPropertyDescriptor(input, key)
     if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
-      throw invalidPlugin(`${path}.${key}`, "must be an enumerable data property")
+      throw invalidPlugin(childPath(path, key), "must be an enumerable data property")
     }
     Object.defineProperty(output, key, { value: descriptor.value, enumerable: true })
   }
@@ -200,10 +209,10 @@ const snapshotCatalog = (input: unknown): Readonly<Record<string, HookKind>> => 
     }
     const descriptor = Object.getOwnPropertyDescriptor(input, key)
     if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
-      throw invalidPlugin(`$options.hooks.${key}`, "must be an enumerable data property")
+      throw invalidPlugin(childPath("$options.hooks", key), "must be an enumerable data property")
     }
     if (!(["sequential", "parallel", "first", "waterfall"] as ReadonlyArray<unknown>).includes(descriptor.value)) {
-      throw invalidPlugin(`$options.hooks.${key}`, "contains an invalid hook kind")
+      throw invalidPlugin(childPath("$options.hooks", key), "contains an invalid hook kind")
     }
     Object.defineProperty(output, key, { value: descriptor.value, enumerable: true })
   }
@@ -258,10 +267,13 @@ const snapshotPlugin = <H>(
   if (values.hooks !== undefined) {
     const rawHooks = ownData(values.hooks, `${path}.hooks`)
     const snapshot: Record<string, unknown> = Object.create(null)
-    for (const hook of Object.keys(rawHooks)) {
+    for (const [index, hook] of Object.keys(rawHooks).entries()) {
+      if (!validName(hook)) {
+        throw invalidPlugin(`${path}.hooks[${index}]`, "contains an invalid hook name")
+      }
       const entry = rawHooks[hook]
       Object.defineProperty(snapshot, hook, {
-        value: snapshotHook(entry, `${path}.hooks.${hook}`, name, hook),
+        value: snapshotHook(entry, childPath(`${path}.hooks`, hook), name, hook),
         enumerable: true
       })
     }
@@ -293,9 +305,6 @@ const flatten = <H>(input: unknown): ReadonlyArray<AdmittedPlugin<H>> => {
   while (stack.length > 0) {
     const current = stack.pop()!
     nodes += 1
-    if (nodes > maximumPluginInputNodes) {
-      throw failure("resource_limit", `plugin input exceeds the ${maximumPluginInputNodes}-node limit`, current.path)
-    }
     if (current.value === false || current.value === null || current.value === undefined) continue
     if (Array.isArray(current.value)) {
       if (current.depth >= maximumPluginDepth) {
@@ -303,11 +312,17 @@ const flatten = <H>(input: unknown): ReadonlyArray<AdmittedPlugin<H>> => {
       }
       if (arrays.has(current.value)) throw invalidPlugin(current.path, "contains a cycle or repeated preset array")
       arrays.add(current.value)
+      const length = current.value.length
+      // Every queued frame and array element costs a node, including omitted
+      // entries. Refuse before enumerating keys, descriptors, or child frames.
+      if (length > maximumPluginInputNodes - nodes - stack.length) {
+        throw failure("resource_limit", `plugin input exceeds the ${maximumPluginInputNodes}-node limit`, current.path)
+      }
       const keys = Reflect.ownKeys(current.value)
-      if (keys.length !== current.value.length + 1 || !keys.includes("length")) {
+      if (keys.length !== length + 1 || !keys.includes("length")) {
         throw invalidPlugin(current.path, "must be a dense preset array with no extra properties")
       }
-      for (let index = current.value.length - 1; index >= 0; index--) {
+      for (let index = length - 1; index >= 0; index--) {
         const descriptor = Object.getOwnPropertyDescriptor(current.value, String(index))
         if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
           throw invalidPlugin(`${current.path}[${index}]`, "must be an enumerable data property")
@@ -465,8 +480,8 @@ export const resolve = <H = FlowsHooks>(
         if (!Object.hasOwn(known, hook)) {
           return yield* Effect.fail(failure(
             "unknown_hook",
-            `plugin "${plugin.name}" declares unknown hook "${hook}"`,
-            `${path}.hooks.${hook}`,
+            `plugin ${JSON.stringify(plugin.name)} declares unknown hook ${JSON.stringify(diagnosticKey(hook))}`,
+            childPath(`${path}.hooks`, hook),
             { plugin: plugin.name, hook }
           ))
         }
@@ -475,7 +490,7 @@ export const resolve = <H = FlowsHooks>(
           return yield* Effect.fail(failure(
             "resource_limit",
             `plugin handlers exceed the limit of ${maximumHandlers}`,
-            `${path}.hooks.${hook}`
+            childPath(`${path}.hooks`, hook)
           ))
         }
       }
