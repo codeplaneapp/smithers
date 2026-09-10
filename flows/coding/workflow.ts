@@ -59,6 +59,25 @@ export const ImplementPlan = Flow.make("coding/ImplementPlan", {
   ))
 })
 
+/** Validate a completed check before either early feedback or final assessment. */
+export const receiptFindings = (plan: Plan, index: number, implementation: Implementation, check: Check, receipt: Receipt) => {
+  const group = plan.changes[index]
+  if (!group || group.id !== implementation.change || !group.checks.some(value =>
+    value.id === check.id && value.flow === check.flow && value.flowDigest === check.flowDigest && value.target === check.target && value.tier === check.tier && value.required === check.required) ||
+    !receiptMatches(implementation, check, receipt)) {
+    throw new CodingError({ code: "invalid_receipt", message: `${implementation.change}: ${check.id} has no exact receipt for the implemented revision` })
+  }
+  for (const finding of receipt.findings) {
+    const owner = plan.changes.findIndex(change => change.id === finding.owner)
+    if (owner < 0 || owner > index || finding.sourceCommitId !== implementation.head.commitId) {
+      throw new CodingError({ code: "invalid_receipt", message: `${check.id} supplied a finding with invalid owner or source revision` })
+    }
+  }
+  return check.required && receipt.status !== "passed" && receipt.findings.length === 0
+    ? [{ owner: group.id, sourceCommitId: implementation.head.commitId, message: `${check.target}: ${receipt.status}` }]
+    : receipt.findings
+}
+
 /** Policy-only implementations. No clock, database, lease, process, or second event log. */
 export const policyLayers = Layer.mergeAll(
   ValidatePlan.toLayer(({ plan }) => Effect.try({ try: () => { validatePlan(plan); return plan }, catch: cause =>
@@ -109,16 +128,10 @@ export const policyLayers = Layer.mergeAll(
         if (!receipt || !receiptMatches(result.implementation, check, receipt)) {
           return yield* Effect.fail(new CodingError({ code: "invalid_receipt", message: `${group.id}: ${check.id} has no receipt for the implemented revision` }))
         }
-        for (const finding of receipt.findings) {
-          const owner = plan.changes.findIndex(change => change.id === finding.owner)
-          if (owner < 0 || owner > index || finding.sourceCommitId !== result.implementation.head.commitId) {
-            return yield* Effect.fail(new CodingError({ code: "invalid_receipt", message: `${check.id} supplied a finding with invalid owner or source revision` }))
-          }
-          findings.push(finding)
-        }
-        if (check.required && receipt.status !== "passed" && receipt.findings.length === 0) {
-          findings.push({ owner: group.id, sourceCommitId: result.implementation.head.commitId, message: `${check.target}: ${receipt.status}` })
-        }
+        findings.push(...yield* Effect.try({
+          try: () => receiptFindings(plan, index, result.implementation, check, receipt),
+          catch: error => error instanceof CodingError ? error : new CodingError({ code: "invalid_receipt", message: String(error) })
+        }))
       }
     }
     return { status: findings.length ? "changes-requested" as const : "validated" as const, changes, findings }

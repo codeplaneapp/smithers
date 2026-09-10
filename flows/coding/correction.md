@@ -10,6 +10,8 @@ agent, native JJ, executable catalog and check layers before advertising it.
 const result = yield* CorrectPlan.execute({ plan, maxRounds: 3 })
 ```
 
+## Bounds and durable rounds
+
 `maxRounds` counts validation passes, including the first implementation pass,
 and must be between one and eight. One means implement and assess once, with no
 repair. A validated result stops immediately. At the bound, unresolved findings
@@ -18,14 +20,45 @@ Each round uses the existing durable trampoline. Each pass is a recorded child
 execution, and completed agent/JJ/check steps replay through the normal engine.
 There is no process-local retry loop or parallel correction writer.
 
-The first pass calls `ImplementPlan` unchanged. Once all of that pass's slow
-checks settle, the recipe chooses the earliest owning Change among its findings.
+## Early actionable feedback
+
+The first pass uses `ObservePlan`, an opt-in composition of the existing
+implementation, fast-gate and check leaves. Each fast-gated implementation and
+finished slow-check receipt is immediately recorded in the existing native
+`DurableDeferred` store. The first valid actionable receipt wins a named durable
+slot. Both that writer and the final implementation-ready writer check the
+committed pair, so no process-local race decides which findings survive replay.
+Once every planned native implementation exists and feedback is actionable, a
+typed `EarlyFeedback` outcome stops the pass before unrelated slow checks finish.
+An implementation or fast-gate failure ends the pass directly; there is no
+separate all-IDs waiter that can be orphaned by that failure.
+
+The controller requests cancellation through the existing native flow runtime,
+then uses the ordinary bounded `Poll` pattern and the engine's lineage/DAG reads
+to require terminal states for the pass and all linked descendants. A cancellation
+request alone is insufficient. Failure to acknowledge within 300 observations
+100 ms apart returns blocked evidence, retaining the original pass and receipts.
+This is a native terminal-state acknowledgement; it does not add a new lease,
+process registry, cancellation service or history store. Immutable check processes
+remain scoped to their existing check leaf. The native acceptance fixture also
+checks the cancelled process and source export are gone before it accepts success.
+
+Only then does correction choose the earliest owning Change among the completed
+receipts. The implementation branch must have finished; this version does not
+preempt a JJ edit midway through an atom or replan uncreated atoms. Repair passes
+use the same feedback path. All originally completed receipts remain in their
+original execution, including the typed early outcome and its trigger.
+
+## Native owner repair
+
 An ordinary `AgentAction` selects one existing atom in that Change and a focused
 repair intent. It uses the existing `coding/implement` seat and asks for no tool
 calls. The deployment owns the model's actual capability envelope; the prompt
-is not an authorization boundary. Enforcing a narrower planning role remains
-a host-integration task; this recipe does not claim that the current
-`coding/implement` seat prevents mutation. A deterministic action rejects an unknown or
+is not an authorization boundary. The configured native host wraps this action
+with the existing `evidenceOnly` authority helper, which removes tool capabilities
+while retaining its parent model, budget and steering. Standalone compositions
+of these exported recipe layers must supply their own equivalent authority;
+the `coding/implement` seat alone does not prevent mutation. A deterministic action rejects an unknown or
 foreign atom before implementation. The normal implementation delegate edits
 that atom in place, preserving its JJ change ID.
 
@@ -52,10 +85,13 @@ again, and the normal input digest prevents stale results from validating it.
 The recipe does not copy a passed flag onto a rewritten tree.
 
 Fast checks still gate the next rechecked Change. Slow checks overlap subsequent
-rechecks. Final assessment uses the existing policy, including the source commit
-and earlier-owner finding validation. This version starts correction only after
-the preceding pass's slow branches settle. It does not yet interrupt ongoing
-forward implementation immediately when an early slow result arrives.
+rechecks. An unchanged prefix keeps only exact individual receipts: missing
+checks are run even when other checks for that Change already passed. Final
+assessment still requires every configured receipt and validates source commits
+and finding ownership. A partial early result is always `changes-requested`,
+never `validated`, vibed or shipped.
+
+## Outcomes and evidence
 
 `CorrectionResult` is a private workflow output, not a new store:
 
@@ -70,8 +106,8 @@ type CorrectionResult = {
 
 An execution failure, including a required fast failure, returns `blocked` and
 the failed pass's native execution ID and a bounded error summary. Its actual check and failure evidence
-remains in that child's existing journal and attempt store. The last complete
-assessment is included when one exists. The recipe never fabricates a partial
+remains in that child's existing journal and attempt store. The last assessment or explicitly partial changes-requested evidence is included
+when one exists. The recipe never fabricates a partial
 validated result after a fast failure or advances to another repair round.
 The parent flow completes with this typed blocked outcome while the failed child
 retains its native failed status. Consumers must inspect `CorrectionResult.status`: a
@@ -83,8 +119,9 @@ exports, real check processes and SQLite. Planner/editor behavior and earlier
 owner classification are scripted, so it proves correction, gates and replay,
 not the quality of a live model's repair choice or a deployed host.
 
-Memory gathering and clarification, disposable POC feedback, history cleanup,
-vibing, append-to-main and optional delivery/canary stages remain separate
-composition work. The underlying memory flows, HumanTask, artifacts, Plue native
-operations and landing service already provide relevant primitives; this recipe
-does not replace those facilities.
+The configured `Request` composition already connects verified wiki refresh,
+memory gathering and clarification, disposable POC feedback, second planning and
+this correction recipe. History cleanup, vibing, append-to-main and optional
+delivery/canary stages remain further composition work. The underlying memory
+flows, HumanTask, artifacts, Plue native operations and landing service provide
+the relevant primitives; this recipe does not replace those facilities.

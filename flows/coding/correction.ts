@@ -5,9 +5,10 @@ import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import { Cause, Effect, Layer, Schema } from "effect"
 import { ApplyNative, NativeCodingError, Operation, OperationResult, ReadResult, readNative, requestIdFor } from "./native.ts"
-import { Change, CodingError, CorrectionResult, Finding, Implementation, Plan, Result, Revision, ValidatedChange, sameRevision } from "./schema.ts"
+import { Change, CodingError, CorrectionResult, Finding, Implementation, Plan, Result, Revision, ValidatedChange, sameRevision, receiptMatches } from "./schema.ts"
 export { CorrectionResult } from "./schema.ts"
-import { Assess, FastGate, Implement, ImplementPlan, RunCheck } from "./workflow.ts"
+import { EarlyFeedback, FeedbackError, ObservePlan, RecordGate, RecordSlow, acknowledgeFeedback, feedbackLayers } from "./feedback.ts"
+import { Assess, FastGate, Implement, RunCheck } from "./workflow.ts"
 
 const MaxRounds = Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(8))
 const Input = Schema.Struct({ plan: Plan, maxRounds: MaxRounds })
@@ -21,7 +22,7 @@ const Context = Schema.Struct({
 const Repair = Schema.Struct({
   change: Change, parent: Revision, memoryRevision: Schema.String, index: Schema.Int, ordinal: Schema.Int
 })
-const Error = Schema.Union([CodingError, NativeCodingError, AgentAction.AgentFailure])
+const Error = Schema.Union([CodingError, EarlyFeedback, NativeCodingError, AgentAction.AgentFailure])
 
 /** Same role and runtime; deployment capabilities govern this planning step. */
 export const SelectRepair = AgentAction.make("coding/select-owner-repair", {
@@ -109,16 +110,20 @@ const reconstruct = (input: typeof Refresh.payloadSchema.Type): ReadonlyArray<Va
   })
 }
 
-const repairChecks = (plan: Plan, refreshed: ReadonlyArray<ValidatedChange>, index: number): Node.Node<ReadonlyArray<ValidatedChange>, CodingError,
-  Action.Requirement<(typeof RunCheck | typeof FastGate)["name"]>> => {
+const repairChecks = (plan: Plan, refreshed: ReadonlyArray<ValidatedChange>, index: number): Node.Node<ReadonlyArray<ValidatedChange>, typeof FeedbackError.Type,
+  Action.Requirement<(typeof RunCheck | typeof FastGate | typeof RecordGate | typeof RecordSlow)["name"]>> => {
   const group = refreshed[index]
   if (!group) return Node.succeed([])
   const change = plan.changes[index]!
-  if (group.receipts.length) return Node.all({ current: Node.succeed(group), next: repairChecks(plan, refreshed, index + 1) })
-    .pipe(Node.map(({ current, next }) => [current, ...next]))
   const checks = (tier: "fast" | "slow") => Node.all(Object.fromEntries(change.checks.filter(check => check.tier === tier)
-    .map(check => [check.id, RunCheck.call({ implementation: group.implementation, check })])))
+    .map(check => {
+      const saved = group.receipts.find(receipt => receiptMatches(group.implementation, check, receipt))
+      const result = saved ? Node.succeed(saved) : RunCheck.call({ implementation: group.implementation, check })
+      return [check.id, tier === "slow" ? result.pipe(Node.bindPlanned(receipt =>
+        RecordSlow.call({ plan, index, implementation: group.implementation, check, receipt }))) : result]
+    })))
   return checks("fast").pipe(Node.bindPlanned(receipts => FastGate.call({ change, parent: group.implementation.parent, implementation: group.implementation, receipts })),
+    Node.bindPlanned(group => RecordGate.call({ plan, index, group })),
     Node.bindPlanned(current => Node.all({ current: Node.succeed(current), slow: checks("slow"), next: repairChecks(plan, refreshed, index + 1) })
       .pipe(Node.map(({ current, slow, next }) => [{ implementation: current.implementation, receipts: [...current.receipts, ...Object.values(slow)] }, ...next]))))
 }
@@ -141,7 +146,7 @@ const RepairPass = Flow.make("coding/RepairPass", {
   )
 })
 const Recheck = Flow.make("coding/RecheckCorrected", {
-  payload: { plan: Plan, changes: Schema.Array(ValidatedChange) }, success: Result, error: CodingError,
+  payload: { plan: Plan, changes: Schema.Array(ValidatedChange) }, success: Result, error: FeedbackError,
   body: ({ plan, changes }) => repairChecks(plan, changes, 0).pipe(Node.bindPlanned(result => Assess.call({ plan, changes: result })))
 })
 
@@ -163,12 +168,12 @@ export const CorrectPlan = Flow.make("coding/CorrectPlan", {
 })
 
 export const correctionLayers = Layer.mergeAll(
-  Interpreter.layer(CorrectPlan), Interpreter.layer(Round), Interpreter.layer(RepairPass), Interpreter.layer(Recheck),
+  feedbackLayers, Interpreter.layer(CorrectPlan), Interpreter.layer(Round), Interpreter.layer(RepairPass), Interpreter.layer(Recheck),
   ReadHistory.toLayer(({ changeIds }) => readNative(changeIds)),
   Begin.toLayer(input => Effect.succeed({ ...input, round: 1, previous: null })),
   Finish.toLayer(({ cursor, outcome }) => Effect.succeed({ status: outcome.blocked ? "blocked" as const : outcome.result!.status, rounds: cursor.round, result: outcome.result ?? cursor.previous, blocked: outcome.blocked })),
   PrepareContext.toLayer(({ plan, previous, read }) => policy(() => {
-    if (previous.status !== "changes-requested" || !previous.findings.length || previous.changes.length !== plan.changes.length) throw stale("Only a complete result with findings can request correction")
+    if (previous.status !== "changes-requested" || !previous.findings.length || previous.changes.length !== plan.changes.length) throw stale("Only a result with all native implementations and actionable findings can request correction")
     const index = Math.min(...previous.findings.map(finding => plan.changes.findIndex(change => change.id === finding.owner)))
     if (index < 0) throw stale("A finding has no known owner")
     if (!sameCode(resolved(read, plan.base.changeId), plan.base)) throw stale("The planned base changed before correction")
@@ -202,11 +207,22 @@ export const correctionLayers = Layer.mergeAll(
     const instance = yield* FlowRuntime.FlowInstance
     const runtime = yield* FlowRuntime.FlowRuntime
     const executionId = Digest.digest(Digest.canonical(["coding/correction-pass/v1", instance.executionId, cursor]))
-    const execute = cursor.previous === null
-      ? runtime.execute(ImplementPlan, { executionId, payload: { plan: cursor.plan } })
+    const execute: Effect.Effect<Result, typeof Error.Type | FlowRuntime.FlowCycleDetected> = cursor.previous === null
+      ? runtime.execute(ObservePlan, { executionId, payload: { plan: cursor.plan } })
       : runtime.execute(RepairPass, { executionId, payload: { plan: cursor.plan, previous: cursor.previous } })
-    return yield* execute.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Result)), Effect.map(result => ({ result, blocked: null })),
-      Effect.catchCause(cause => Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed({ result: null,
-        blocked: { executionId, message: Cause.pretty(cause).slice(0, 8192) } })))
+    return yield* execute.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Result)), Effect.map((result): typeof RoundOutcome.Type => ({ result, blocked: null })),
+      Effect.catchCause(cause => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
+        const early = cause.reasons.find(reason => Cause.isFailReason(reason) && reason.error instanceof EarlyFeedback)
+        if (early && Cause.isFailReason(early) && early.error instanceof EarlyFeedback) {
+          const result = early.error.result
+          return acknowledgeFeedback(cursor.previous === null ? ObservePlan : RepairPass, executionId).pipe(
+            Effect.as<typeof RoundOutcome.Type>({ result, blocked: null }),
+            Effect.catchCause(ack => Cause.hasInterruptsOnly(ack) ? Effect.interrupt : Effect.succeed<typeof RoundOutcome.Type>({ result,
+              blocked: { executionId, message: `Obsolete checks have not acknowledged cancellation: ${Cause.pretty(ack).slice(0, 8192)}` } }))
+          )
+        }
+        return Effect.succeed<typeof RoundOutcome.Type>({ result: null, blocked: { executionId, message: Cause.pretty(cause).slice(0, 8192) } })
+      }))
   }))
 )

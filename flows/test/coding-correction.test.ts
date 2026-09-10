@@ -53,12 +53,17 @@ test("owner correction preserves native identities and prefix receipts, restacks
   await writeFile(join(root, "verify.mjs"), `import {appendFileSync,existsSync,readFileSync} from 'node:fs';
 const [log,tier]=process.argv.slice(2);const stage=existsSync('server.txt')?'server':existsSync('owner.txt')?'owner':'prefix';
 appendFileSync(log,stage+':'+tier+'\\n');
+if(tier==='slow'&&stage==='prefix'&&existsSync(log+'.early')&&!existsSync(log+'.repair-started')) {
+  appendFileSync(log+'.waiting',process.pid+':'+process.cwd()+'\\n');
+  while(!existsSync(log+'.release-unrelated')) await new Promise(resolve=>setTimeout(resolve,20));
+}
+
 process.exit(tier==='fast'&&existsSync(log+'.fastfail')?9:tier==='slow'&&stage==='server'&&readFileSync('owner.txt','utf8')!=='fixed'?7:0);
 `)
   for (const [name, delegate, body] of [
     ["implementation", "coding/Implement", "Implement one Change"],
     ["checks/fast", "coding/CommandCheck", JSON.stringify({ argv: [process.execPath, "verify.mjs", log, "fast"], cwd: ".", timeoutMs: 30_000 })],
-    ["checks/slow", "fixture/OwnerReview", JSON.stringify({ argv: [process.execPath, "verify.mjs", log, "slow"], cwd: ".", timeoutMs: 30_000 })]
+    ["checks/slow", "fixture/OwnerReview", JSON.stringify({ argv: [process.execPath, "verify.mjs", log, "slow"], cwd: ".", timeoutMs: 300_000 })]
   ]) {
     await mkdir(join(root, "flows", name!), { recursive: true })
     await writeFile(join(root, "flows", name!, "flow.mdx"), `---\ndescription: Correction fixture ${name}.\nflows: [${delegate}]\ncapabilities: ['*']\n---\n${body}\n`)
@@ -85,14 +90,19 @@ process.exit(tier==='fast'&&existsSync(log+'.fastfail')?9:tier==='slow'&&stage==
       checks: ["fast", "slow"].map(tier => ({ id: tier, target: tier, flow: `checks/${tier}`, flowDigest: digest(`checks/${tier}`), tier: tier as "fast" | "slow", required: true })) })) }
   const edits: string[] = [], selections: string[] = []
   const before: { owner: Implementation; tip: Revision }[] = []
-  let refuseSelection = false, leaveWrong = false, alterPrefix = false
+  let refuseSelection = false, leaveWrong = false, alterPrefix = false, earlyFeedback = false
   const fs = await Effect.runPromise(FileSystem.FileSystem.pipe(Effect.provide(NodeFileSystem.layer)))
-  const runtime = () => NodeRuntime.layerHost({ filename: join(root, ".flows", "engine.db"), workspaceRoot: root, owner: { hostId: "correction-test" }, signals: [],
+  const HostRuntime = process.versions.bun ? await import("@smthrs/flows/BunRuntime") : NodeRuntime
+  const runtime = () => HostRuntime.layerHost({ filename: join(root, ".flows", "engine.db"), workspaceRoot: root, owner: { hostId: "correction-test" }, signals: [],
     rules: [[new Rule({ effect: "allow", pattern: new CapabilityPattern({ action: "proc:spawn", resource: "**" }) })]] },
     Layer.mergeAll(correctionLayers, atomFlows, atomOperations, nativeActions, catalogLayers, policyLayers,
       Interpreter.layer(ImplementPlan), Interpreter.layer(Review), ...executable.map(entry => entry.layer),
       checkLayers({ repositoryPath: root, exporterPath: exporter, fs }),
       SelectRepair.toLayer(context => Effect.gen(function*() {
+        if (earlyFeedback) {
+          assert.ok((yield* Effect.promise(() => readFile(log + ".waiting", "utf8"))).length)
+          yield* Effect.promise(() => writeFile(log + ".repair-started", "started before unrelated review completed"))
+        }
         selections.push(context.owner.id)
         assert.equal(context.owner.id, "owner")
         const view = yield* (yield* NativeCoding).read().pipe(Effect.orDie)
@@ -147,6 +157,30 @@ process.exit(tier==='fast'&&existsSync(log+'.fastfail')?9:tier==='slow'&&stage==
   assert.deepEqual(await run("owner-correction"), first)
   assert.equal(edits.length, 5); assert.equal(selections.length, 1)
   assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), checkLines, "replay runs no command again")
+
+  // The prefix review never voluntarily returns; a descendant finding must
+  // cancel it and repair its earlier owner before the unrelated review ends.
+  earlyFeedback = true
+  await writeFile(log + ".early", "enabled")
+  const earlyStart = (await readFile(log, "utf8")).trim().split("\n").length
+  const early = await run("owner-correction-early-feedback")
+  assert.equal(early.status, "validated", early.blocked?.message ?? "Early feedback should complete owner correction")
+  assert.equal(early.rounds, 2)
+  const earlyLines = (await readFile(log, "utf8")).trim().split("\n").slice(earlyStart)
+  assert.equal(earlyLines.filter(line => line === "prefix:fast").length, 1, "exact completed prefix receipt is retained")
+  assert.equal(earlyLines.filter(line => line === "prefix:slow").length, 2, "cancelled missing prefix receipt is measured before validation")
+  const waiting = (await readFile(log + ".waiting", "utf8")).trim().split("\n")
+  for (const item of waiting) {
+    const separator = item.indexOf(":"), pid = Number(item.slice(0, separator)), scratch = item.slice(separator + 1)
+    assert.throws(() => process.kill(pid, 0), "obsolete checker process has exited")
+    await assert.rejects(readFile(join(scratch, "verify.mjs")), /ENOENT/, "obsolete immutable scratch is released")
+  }
+  const earlyEdits = edits.length, earlySelections = selections.length
+  await host.dispose(); host = ManagedRuntime.make(runtime())
+  assert.deepEqual(await run("owner-correction-early-feedback"), early)
+  assert.equal(edits.length, earlyEdits); assert.equal(selections.length, earlySelections)
+  earlyFeedback = false
+  await rm(log + ".early")
 
   leaveWrong = true
   const bounded = await run("owner-correction-bounded", 2)
