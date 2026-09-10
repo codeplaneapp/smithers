@@ -399,12 +399,7 @@ export const maximumEffectPathLength = 4096
  */
 export const maximumEffectGlobs = 128
 
-interface GraphImpl {
-  readonly nodes: ReadonlyArray<InternalNode>
-  readonly edges: ReadonlyArray<InternalEdge>
-  readonly diagnostics: ReadonlyArray<GraphBuildError>
-  readonly conflicts: ReadonlyArray<Conflict>
-}
+declare const GraphTypeId: unique symbol
 
 /**
  * An immutable, observation-only flow graph.
@@ -414,13 +409,31 @@ interface GraphImpl {
  * edit the plan it is reading. Read a graph through {@link nodes},
  * {@link edges}, {@link effects}, {@link placements}, {@link conflicts},
  * {@link diagnostics}, and {@link keyMaterial}; the storage fields behind those
- * getters are not part of the published shape.
+ * getters are not part of the published shape, so this type names none of
+ * them. Publishing them would type a write to a frozen node as legal and turn
+ * it into a runtime `TypeError`.
  *
  * @category models
  * @since 0.0.0
  * @slop
  */
-export type Graph = GraphImpl
+export interface Graph {
+  readonly [GraphTypeId]: typeof GraphTypeId
+}
+
+/**
+ * The storage `build` allocates behind a {@link Graph} handle. A graph is its
+ * storage at runtime; the extra declaration exists so only this module can
+ * name the fields.
+ */
+interface GraphImpl extends Graph {
+  readonly nodes: ReadonlyArray<InternalNode>
+  readonly edges: ReadonlyArray<InternalEdge>
+  readonly diagnostics: ReadonlyArray<GraphBuildError>
+  readonly conflicts: ReadonlyArray<Conflict>
+}
+
+const impl = (graph: Graph): GraphImpl => graph as GraphImpl
 
 const option = <I, S>(context: Context.Context<never>, key: Context.Key<I, S>): S | undefined =>
   Option.getOrUndefined(Annotations.getOption(context, key))
@@ -1505,7 +1518,7 @@ const freezeGraph = (
   freezeDeep(graph.edges)
   freezeDeep(graph.conflicts)
   freezeDeep(graph.diagnostics)
-  return Object.freeze(graph)
+  return Object.freeze(graph) as unknown as Graph
 }
 
 const dependencyOrder = (
@@ -2273,7 +2286,7 @@ export const build = (
  * @since 0.0.0
  * @slop
  */
-export const nodes = (graph: Graph): ReadonlyArray<GraphNode> => graph.nodes as ReadonlyArray<GraphNode>
+export const nodes = (graph: Graph): ReadonlyArray<GraphNode> => impl(graph).nodes as ReadonlyArray<GraphNode>
 
 /**
  * Returns graph dependency edges in structural preorder.
@@ -2282,7 +2295,7 @@ export const nodes = (graph: Graph): ReadonlyArray<GraphNode> => graph.nodes as 
  * @since 0.0.0
  * @slop
  */
-export const edges = (graph: Graph): ReadonlyArray<Edge> => graph.edges
+export const edges = (graph: Graph): ReadonlyArray<Edge> => impl(graph).edges
 
 /**
  * Returns declared and inherited effect data for nodes that carry either.
@@ -2292,7 +2305,7 @@ export const edges = (graph: Graph): ReadonlyArray<Edge> => graph.edges
  * @slop
  */
 export const effects = (graph: Graph): ReadonlyArray<EffectEntry> =>
-  graph.nodes
+  impl(graph).nodes
     .filter((node) => node.declaredEffects !== undefined || node.effectiveEffects !== undefined)
     .map((node) => ({
       nodeId: node.id,
@@ -2308,7 +2321,9 @@ export const effects = (graph: Graph): ReadonlyArray<EffectEntry> =>
  * @slop
  */
 export const placements = (graph: Graph): ReadonlyArray<PlacementEntry> =>
-  graph.nodes.flatMap((node) => node.placement === undefined ? [] : [{ nodeId: node.id, placement: node.placement }])
+  impl(graph).nodes.flatMap((node) =>
+    node.placement === undefined ? [] : [{ nodeId: node.id, placement: node.placement }]
+  )
 
 /**
  * Returns overlapping-write conflict data.
@@ -2317,7 +2332,7 @@ export const placements = (graph: Graph): ReadonlyArray<PlacementEntry> =>
  * @since 0.0.0
  * @slop
  */
-export const conflicts = (graph: Graph): ReadonlyArray<Conflict> => graph.conflicts
+export const conflicts = (graph: Graph): ReadonlyArray<Conflict> => impl(graph).conflicts
 
 /**
  * Returns build diagnostics without throwing.
@@ -2326,7 +2341,7 @@ export const conflicts = (graph: Graph): ReadonlyArray<Conflict> => graph.confli
  * @since 0.0.0
  * @slop
  */
-export const diagnostics = (graph: Graph): ReadonlyArray<GraphBuildError> => graph.diagnostics
+export const diagnostics = (graph: Graph): ReadonlyArray<GraphBuildError> => impl(graph).diagnostics
 
 /**
  * Returns node-associated, digest-free key material in topological dependency
@@ -2340,10 +2355,11 @@ export const diagnostics = (graph: Graph): ReadonlyArray<GraphBuildError> => gra
 export const keyMaterial = (
   graph: Graph
 ): Result.Result<ReadonlyArray<KeyMaterial.Entry>, GraphBuildError> => {
-  for (const diagnostic of graph.diagnostics) {
+  const storage = impl(graph)
+  for (const diagnostic of storage.diagnostics) {
     if (isFatalDiagnostic(diagnostic)) return Result.fail(diagnostic)
   }
-  const order = dependencyOrder(graph.nodes)
+  const order = dependencyOrder(storage.nodes)
   if (Result.isFailure(order)) return Result.fail(order.failure)
   const ordered: Array<KeyMaterial.Entry> = []
   for (const node of order.success) {

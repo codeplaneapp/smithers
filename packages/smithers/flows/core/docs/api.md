@@ -619,7 +619,7 @@ interface LayerRequest {
 ### Graph.Graph
 
 ```ts
-type Graph
+interface Graph
 ```
 
 An immutable, observation-only flow graph. `build` deep-freezes everything it
@@ -627,8 +627,9 @@ constructs, so the getters hand back the graph's own values rather than copies.
 Read a graph through [`nodes`](#graphnodes), [`edges`](#graphedges),
 [`effects`](#grapheffects), [`placements`](#graphplacements),
 [`conflicts`](#graphconflicts), [`diagnostics`](#graphdiagnostics), and
-[`keyMaterial`](#graphkeymaterial); the storage fields behind those getters are
-not part of the published shape.
+[`keyMaterial`](#graphkeymaterial). The type is opaque and names no storage
+field, so a getter is the only way to read a graph and no write to a frozen
+node can typecheck.
 
 ### Graph.nodes
 

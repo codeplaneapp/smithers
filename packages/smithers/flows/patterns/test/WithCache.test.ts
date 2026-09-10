@@ -149,7 +149,7 @@ describe("WithCache policy", () => {
     for (const ttlMs of [1, Number.MAX_SAFE_INTEGER]) {
       const cached = WithCache.withCache(echo, { ttlMs, version: "v1" })
       expect(CacheEnvironment.cachePolicyOf(annotationsOf(cached))).toEqual({ ttlMs })
-      expect(Graph.build(cached, "hello").diagnostics).toEqual([])
+      expect(Graph.diagnostics(Graph.build(cached, "hello"))).toEqual([])
     }
   })
 
