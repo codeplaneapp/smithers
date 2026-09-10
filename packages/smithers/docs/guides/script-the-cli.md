@@ -63,7 +63,8 @@ Exit 3 happens two ways, and the receipt tells them apart.
 
 A `Parked` receipt means the Plan carries no grant. Approve the same payload
 you submitted to record the grant, then submit it with `flow execute` to launch
-the run. Plan approval alone returns no `runId` and starts no execution:
+the run. Reuse the payload's `idempotencyKey` for both commands. Plan approval
+alone returns no `runId` and starts no execution:
 
 ```bash
 status=0
@@ -79,14 +80,15 @@ fi
 
 An `Accepted` receipt with exit 3 means the run started and then parked on an
 in-run Node approval. The run journals a `control.approval.requested` event
-whose `payload` member is the exact argument for `smthrs approve`. Approving
-that Node resumes the existing run; it needs no new `flow execute` submission:
+whose `payload.question` describes the ask and whose `payload.payload` is the
+exact argument for `smthrs approvals approve`. Approving that Node resumes
+the existing run; it needs no new `flow execute` submission:
 
 ```bash
 run_id="$(printf '%s' "$receipt" | jq -r '.runId')"
 ask="$(smthrs --json logs "$run_id" \
-  | jq -c 'map(select(.kind == "control.approval.requested")) | last | .payload')"
-smthrs --json approve "$ask" --scope once
+  | jq -c 'map(select(.kind == "control.approval.requested")) | last | .payload.payload')"
+smthrs --json approvals approve "$ask" --scope once
 ```
 
 `--scope` decides how far the grant reaches: `once` answers this ask alone,

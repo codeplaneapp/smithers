@@ -105,6 +105,27 @@ The compact document, with a run id and project root standing in for yours:
 {"detached":true,"logFile":"/srv/deploy/.flows/logs/run-01J9.log","runId":"run-01J9"}
 ```
 
+For a scripted launch using a previously planned `approval` payload, handle a
+`Parked` receipt with the same approve-then-launch sequence as `up`. Plan
+approval records the grant but starts no run. Submit the same payload with
+`flow execute`, retaining its `idempotencyKey`:
+
+```bash
+status=0
+receipt="$(smthrs flow execute "$approval" --json)" || status=$?
+if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
+  exit "$status"
+fi
+if [ "$(printf '%s' "$receipt" | jq -r '._tag')" = "Parked" ]; then
+  smthrs approvals approve "$approval" --scope run --json
+  receipt="$(smthrs flow execute "$approval" --json)"
+fi
+```
+
+An in-run Node approval instead resumes its existing run. See
+[Script the CLI](../../guides/script-the-cli.md#answer-a-park) for extracting
+the nested approval payload from its event.
+
 ## See also
 
 - [`smthrs plan`](/cli/plan) performs the planning half
