@@ -80,7 +80,9 @@ after restart. It refuses unavailable or unverified project flows.
 ## Host composition
 
 The private [`coding/request`](request.md) entry accepts a prompt and composes
-memory-backed planning, native source admission and bounded owner correction.
+verified wiki refresh, memory-backed planning, native source admission, a
+retained disposable [source prototype](poc.md), a second plan informed by the
+prototype and original user feedback, and bounded owner correction.
 Its result is decoded by the same pure schemas that the UI uses for recorded
 plan and validation evidence. It uses the existing gateway Control operations.
 
@@ -89,8 +91,10 @@ history gathering, a request review, an optional durable clarification, a model
 draft, and source verification before binding the existing `Plan` schema. See
 [planning.md](planning.md) for composition, new internal context/draft shapes,
 native-history window rules, and the current deployment-authority requirement.
-The default memory action reuses the existing wiki verifier and keyword scorer;
-it refuses stale documentation and does not yet regenerate it automatically.
+The memory action reuses the existing wiki verifier and keyword scorer and
+refuses stale documentation. The higher-level `PrepareWithWiki` child refreshes
+and verifies the owning page catalog before calling `PreparePlan`; unchanged
+pages reuse exact native review evidence. See [planning-wiki.md](planning-wiki.md).
 
 `registration.ts` is private repository configuration, not a new package API.
 Register `RunPlan` as a delegate when constructing the host's existing executable
@@ -148,13 +152,15 @@ real mutation, retries lock contention, implements two inlined Changes without
 ID collisions, and refuses to retry a revision conflict. The agent in this test is scripted; a live model
 and complete production host still require the configured composition.
 
-This is a validated implementation pass, not the complete coding product. Its
-result is `validated` or `changes-requested`. The pass does not yet apply
-corrections, restack earlier revisions, invalidate downstream builds, clean
-history, mark work vibed, append to main, or ship. Those operations need the native
-Plue JJ/build delegates and subsequent ordinary workflow stages. Nor does a
-receipt schema prove that an arbitrary delegate performed a real test: deployment
-adapters must measure their native results rather than trust agent assertions.
+`ImplementPlan` remains a single implementation pass. Its result is `validated`
+or `changes-requested`. The higher-level [CorrectPlan](correction.md) workflow
+selects the earliest owning Change, preserves its native atom IDs, edits and
+restacks through JJ, and reruns checks for the invalidated suffix within a
+bounded round limit. Missing or stale evidence cannot count as validation.
+History cleanup, marking work vibed, appending to main and shipment still need
+subsequent ordinary workflow stages. A receipt schema alone does not prove that
+an arbitrary delegate performed a real test: deployment adapters must measure
+their native results rather than trust agent assertions.
 
 Ten integration tests exercise a real native flows runtime with SQLite and JJ
 fixtures: fast failure, stale receipt, wrong parent, earlier-owner feedback,
